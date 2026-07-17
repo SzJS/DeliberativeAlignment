@@ -1,1 +1,0 @@
-The point of this experiment is to see what happens if we try to replicate the RCC paper but with a trained model instead of a prompted one.

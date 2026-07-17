@@ -2,7 +2,7 @@ This project aims to move towards a pluralistic target of alignment, based on th
 - Alignment target = collective deliberation. The paper's answer to "align to what?" is contractualist: an AI should do what the affected parties would agree to if they deliberated together under fair conditions. Pluralism here isn't averaging individual preferences — it's aligning to what a group would collectively endorse.
 - You can't actually run that deliberation, so you approximate it. Real agreement among diverse stakeholders is slow and costly, and often impossible to convene. So the target is treated as an ideal that AI systems approximate rather than compute exactly.
 - Approximate the deliberation with cognitively-inspired heuristics that trade effort for accuracy — spend more deliberative effort when stakes and disagreement are high, cheap shortcuts when they're low. Which approximation is appropriate is context-dependent: it shifts with the stakes, the parties involved, and the social situation.
-This paper is called resource-constrained contractualism (RCC).
+This paper is called resource-constrained contractualism (RRC).
 
 How do we approximate that target? We will teach a model to simulate stakeholder deliberation in its chain-of-thought. Specifically, we will modify the deliberative alignment pipeline: https://arxiv.org/abs/2412.16339
 First, let me present a summary of the original training pipeline — how the model learns to do the right thing for the right reasons:
@@ -13,9 +13,9 @@ First, let me present a summary of the original training pipeline — how the mo
 Finally, at inference: given only a bare prompt, the model recalls the relevant policy, reasons over it in its CoT, then answers — raising jailbreak robustness while reducing over-refusal.
 
 So here is how our proposed training pipeline would work, at a high-level, combining the alignment target of the first paper with the training pipeline of deliberative alignment:
-1. Generate RCC-data: in usual/ordinary situations, rule-based thinking (based on a document we specify), otherwise synthetic deliberations with multiple stakeholders. In the latter case, ransform the data so that the log of deliberations is the chain-of-thought; generate completions based on the outcome of the deliberations.
-2. Filter with a judge the data which do not respect RCC alignment or are malformed otherwise.
-3. SFT on the data (process supervision) to teach the model to perform RCC-alignment, which includes collective deliberations in its COT.
+1. Generate RRC-data: in usual/ordinary situations, rule-based thinking (based on a document we specify), otherwise synthetic deliberations with multiple stakeholders. In the latter case, ransform the data so that the log of deliberations is the chain-of-thought; generate completions based on the outcome of the deliberations.
+2. Filter with a judge the data which do not respect RRC alignment or are malformed otherwise.
+3. SFT on the data (process supervision) to teach the model to perform RRC-alignment, which includes collective deliberations in its COT.
 4. Perform outcome supervision through RL (i.e. ignore the CoT).
 
 The point is that, unlike deliberative alignment, we do not align the model with static rules, but also provide a systematic way of diverging from said rules.
