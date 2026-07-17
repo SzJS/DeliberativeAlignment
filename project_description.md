@@ -17,3 +17,10 @@ So here is how our proposed training pipeline would work, at a high-level, combi
 2. Filter with a judge the data which do not respect RCC alignment or are malformed otherwise.
 3. SFT on the data (process supervision) to teach the model to perform RCC-alignment, which includes collective deliberations in its COT.
 4. Perform outcome supervision through RL (i.e. ignore the CoT).
+
+The point is that, unlike deliberative alignment, we do not align the model with static rules, but also provide a systematic way of diverging from said rules.
+
+How to de-risk the idea? Small, well-defined domain with rules (that should be broken sometimes) with well-defined stakeholders; this is the simplest setting where it could work. Ignore RL (i.e. step 4) to minimise costs."
+
+Fable's suggestion for an experiment:
+ Wikipedia deletion and editing policy. Possibly the best real-world fit. The policies are codified and public (notability, verifiability, BLP), stakeholders are well-defined (article subject, editors, readers, the encyclopedia's mission), and — crucially — Wikipedia has an institutionalized meta-rule, "Ignore All Rules," so legitimate rule-breaking is part of the spec itself. Best of all, Articles for Deletion (AfD) debates are literally thousands of logged multi-stakeholder deliberations with recorded outcomes, including outcomes that override the letter of the rules. You get real deliberation transcripts to seed or validate your synthetic CoTs, and closure decisions as ground truth. The main cost is messiness: real AfD logs are noisy and outcomes are sometimes wrong.
