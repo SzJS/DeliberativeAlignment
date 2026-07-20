@@ -10,7 +10,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from config_utils import load_config
+from dr_rrc_replication.src.config_utils import load_config
 
 
 def main() -> None:

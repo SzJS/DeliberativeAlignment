@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from prompts import (
+from dr_rrc_replication.src.prompts import (
     FORMATTING_INSTRUCTIONS_ANSWER_ONLY,
     FORMATTING_INSTRUCTIONS_PAPER,
     MINIMAL_SYSTEM_PROMPT,

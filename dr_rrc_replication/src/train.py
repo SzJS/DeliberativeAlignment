@@ -27,8 +27,8 @@ from transformers import (
     TrainingArguments,
 )
 
-from config_utils import load_config
-from data_utils import build_completion
+from dr_rrc_replication.src.config_utils import load_config
+from dr_rrc_replication.src.data_utils import build_completion
 
 
 def load_tokenizer(base_model: str):

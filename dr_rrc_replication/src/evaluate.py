@@ -20,8 +20,8 @@ from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 
-from config_utils import load_config
-from data_utils import build_baseline_messages, build_sft_messages, parse_output
+from dr_rrc_replication.src.config_utils import load_config
+from dr_rrc_replication.src.data_utils import build_baseline_messages, build_sft_messages, parse_output
 
 
 def load_jsonl(path: Path) -> list[dict]:

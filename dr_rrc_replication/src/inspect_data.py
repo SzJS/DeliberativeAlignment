@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from config_utils import load_config
-from datasets_common import RESULT_FILES, rrc_sheet_name
+from dr_rrc_replication.src.config_utils import load_config
+from dr_rrc_replication.src.datasets_common import RESULT_FILES, rrc_sheet_name
 
 
 def main() -> None:
