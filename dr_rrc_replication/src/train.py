@@ -13,7 +13,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
 from pathlib import Path
 
 import torch
@@ -26,9 +28,34 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.trainer_utils import get_last_checkpoint
 
 from dr_rrc_replication.src.config_utils import load_config
 from dr_rrc_replication.src.data_utils import build_completion
+
+
+def resolve_attn_impl(requested: str) -> str:
+    """Resolve the requested attention impl to one this install/GPU supports.
+
+    Prechecks rather than catching a failure: a pre-Ampere GPU LOADS a
+    flash_attention_2 model fine and only dies on the first attention forward
+    (deep inside training), so try/except around from_pretrained would miss it
+    and also double-load the model. Only the transformers fallback path uses
+    this; unsloth applies its own fused attention.
+    """
+    allowed = {"flash_attention_2", "sdpa", "eager"}
+    if requested not in allowed:
+        raise ValueError(f"attn_implementation must be one of {sorted(allowed)}, got {requested!r}")
+    if requested != "flash_attention_2":
+        return requested
+    from transformers.utils import is_flash_attn_2_available
+
+    ampere_plus = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
+    if is_flash_attn_2_available() and ampere_plus:
+        return "flash_attention_2"
+    print("[train] flash_attention_2 unavailable (needs the flash-attn package + an "
+          "Ampere-or-newer GPU); falling back to sdpa.")
+    return "sdpa"
 
 
 def load_tokenizer(base_model: str):
@@ -72,7 +99,8 @@ def load_model_and_tokenizer(cfg: dict):
 
     # --- transformers + peft fallback ---
     tok = load_tokenizer(cfg["base_model"])
-    model_kwargs = {"torch_dtype": torch.bfloat16}
+    attn_impl = resolve_attn_impl(cfg.get("attn_implementation", "flash_attention_2"))
+    model_kwargs = {"torch_dtype": torch.bfloat16, "attn_implementation": attn_impl}
     if cfg.get("load_in_4bit"):
         from transformers import BitsAndBytesConfig
 
@@ -83,6 +111,9 @@ def load_model_and_tokenizer(cfg: dict):
         )
     model = AutoModelForCausalLM.from_pretrained(cfg["base_model"], **model_kwargs)
     model.config.use_cache = False
+    # read back what was actually applied, so a silent fallback is visible
+    print(f"[train] transformers backend: attn_implementation="
+          f"{getattr(model.config, '_attn_implementation', 'unknown')}")
     if cfg.get("load_in_4bit"):
         from peft import prepare_model_for_kbit_training
 
@@ -177,6 +208,20 @@ def main() -> None:
     train_ds = make_dataset(load_jsonl(out_dir / "train.jsonl"), tok, cfg["max_seq_len"], "train")
     val_ds = make_dataset(load_jsonl(out_dir / "val.jsonl"), tok, cfg["max_seq_len"], "val")
 
+    # --- Weights & Biases (opt-in via config; must not hang a headless pod) ---
+    report_to, run_name = "none", None
+    wandb_project = cfg.get("wandb_project")
+    if wandb_project and importlib.util.find_spec("wandb") is None:
+        print("[train] wandb_project set but wandb is not installed; logging disabled.")
+    elif wandb_project:
+        os.environ["WANDB_PROJECT"] = wandb_project
+        # No API key on a fresh pod would trigger an interactive login prompt that
+        # silently hangs the job -> force offline logging instead.
+        if not os.environ.get("WANDB_API_KEY") and not os.environ.get("WANDB_MODE"):
+            os.environ["WANDB_MODE"] = "offline"
+            print("[train] no WANDB_API_KEY found; logging to wandb in offline mode.")
+        report_to, run_name = "wandb", f"{cfg['condition']}-{cfg['split_mode']}"
+
     targs = TrainingArguments(
         output_dir=str(out_dir / "trainer"),
         num_train_epochs=cfg["epochs"],
@@ -194,11 +239,14 @@ def main() -> None:
         eval_steps=cfg["eval_steps"],
         save_strategy="steps",
         save_steps=cfg["eval_steps"],
-        save_total_limit=1,
+        # keep >=2 when loading the best model at end: a resumed run can otherwise
+        # rotate away the checkpoint best_model_checkpoint points to and crash.
+        save_total_limit=2 if cfg.get("save_best", True) else 1,
         load_best_model_at_end=cfg.get("save_best", True),
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        report_to="none",
+        report_to=report_to,
+        run_name=run_name,
         seed=cfg["seed"],
         gradient_checkpointing=hf_grad_ckpt,
     )
@@ -210,7 +258,16 @@ def main() -> None:
         eval_dataset=val_ds,
         data_collator=DataCollatorForSeq2Seq(tok, padding=True, label_pad_token_id=-100),
     )
-    trainer.train()
+    # Opt-in resume from the latest checkpoint. NOT automatic on dir existence:
+    # smoke and real runs share out_dir=artifacts, so auto-resuming would try to
+    # load a 1.5B smoke checkpoint into the 7B run (crash). Set resume:true only
+    # to continue an interrupted run of the SAME config; clear artifacts/trainer
+    # when switching smoke<->real or changing the model/LoRA config.
+    trainer_dir = out_dir / "trainer"
+    ckpt = get_last_checkpoint(str(trainer_dir)) if cfg.get("resume", False) and trainer_dir.is_dir() else None
+    if ckpt:
+        print(f"[train] resuming from checkpoint {ckpt}")
+    trainer.train(resume_from_checkpoint=ckpt)
 
     adapter_dir = out_dir / "adapter"
     model.save_pretrained(adapter_dir)

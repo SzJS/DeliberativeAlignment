@@ -27,10 +27,11 @@ supervision, CoT hidden). De-risking work deliberately **skips RL** to cut cost.
   "when is rule-breaking correct" computable, so RCC can be measured against DA rather than judged.
   No code yet.
 
-Note the naming inconsistency: the directory is `dr_rcc_replication` but the paper/spec is
-abbreviated **RRC** throughout the code and docs. They refer to the same thing.
+Naming note: the directory and Python import root are `dr_rrc_replication` (matching the paper's
+**RRC** abbreviation); only the pyproject `[project].name` still reads `dr-rcc-replication`
+(cosmetic — `package = false`).
 
-## Working in `dr_rcc_replication`
+## Working in `dr_rrc_replication`
 
 This is a `uv`-managed Python package (`package = false`, run scripts with `uv run`). The
 deps are split so **data-prep stages run CPU-only** and only training/eval need the GPU stack.
@@ -40,6 +41,9 @@ deps are split so **data-prep stages run CPU-only** and only training/eval need 
 uv sync                              # CPU-only: data prep + eval scoring deps
 uv sync --extra gpu                  # add torch/transformers/trl/peft for training
 uv sync --extra gpu --extra unsloth  # optional faster/lower-VRAM LoRA
+# Optional flash-attention for the transformers fallback path (unsloth has its own
+# kernels; train.py auto-degrades to sdpa if this isn't installed):
+#   uv pip install flash-attn --no-build-isolation
 # If the (RunPod) base image ships its own CUDA torch:
 #   uv venv --system-site-packages && uv sync --extra gpu
 
@@ -73,7 +77,11 @@ via `config_utils.load_config` (which applies `smoke_overrides` when `smoke: tru
 - **`datasets_common.py`** — schema knowledge for the paper's result workbooks. Knows the file
   list (`RESULT_FILES`: agent/development × easy/hard), sheet naming (`"{model} {approach}"`),
   and normalizes two slightly different column schemas into one frame. `load_condition` returns
-  accuracy==1 traces (`rrc_only`, or `best_per_vignette` which prefers deliberation on hard cases).
+  accuracy==1 traces per `condition`: `rrc_only`; `best_per_vignette` (prefers deliberation on
+  hard cases); or `framed_deliberation` (best_per_vignette with an RRC preamble on hard cases).
+- **`framed_deliberation.py`** — builds the `framed_deliberation` targets: an RRC procedure-selection
+  preamble (LLM-written, committed to `assets/framed_deliberation.json`) + the paper's full
+  virtual-bargaining deliberation verbatim. Rebuild the sidecar with `scripts/build_framed_sidecar.py`.
 - **`prepare_data.py`** — builds leakage-safe splits and writes jsonl. **Splits on scenario key,
   never on story rows**, so all wording-variants and the easy/hard versions of a scenario stay on
   one side. Two modes: `random` (stratified, ~balanced test set) and `stakes_generalisation`
@@ -92,6 +100,8 @@ via `config_utils.load_config` (which applies `smoke_overrides` when `smoke: tru
   loss on the assistant target only). Reasoning target uses the base model's native
   `<think>…</think>`; the answer uses `START_OUTPUT YES/NO END_OUTPUT`. Prefers `unsloth` and
   **auto-falls back to transformers+peft** if it can't import, so a run never hard-blocks on it.
+  Flash-attention (`attn_implementation`, fallback path only), W&B (`wandb_project`), and
+  checkpoint resume (`resume`) are config-gated and degrade gracefully.
 - **`evaluate.py`** — scores four methods on the same frozen test vignettes: `sft` (base+adapter),
   `no_thinking` (floor), `rrc_incontext` (prompt-vs-distill on the same base), `paper_rrc` (the
   paper's own answer, a free lookup). Baselines run with `model.disable_adapter()`.
@@ -110,8 +120,10 @@ via `config_utils.load_config` (which applies `smoke_overrides` when `smoke: tru
   p95 > `max_seq_len`, raise `max_seq_len` instead.
 - **Splitting is leakage-safe by construction** — `prepare_data.make_splits` hard-asserts no
   scenario-group overlap across splits. Don't weaken those assertions.
-- **`stakes_generalisation` produces a degenerate (all-YES hard) test set** with majority baseline
-  1.0; read its accuracy together with the easy `val` (all-NO) to catch a YES-collapse.
+- **The dataset is separable by difficulty: all hard vignettes are ground-truth YES, all easy NO.**
+  So difficulty alone predicts the label — YES/NO accuracy can't show whether deliberation *content*
+  helps (judge CoT structure too), and `stakes_generalisation`'s hard test set is all-YES (majority
+  baseline 1.0; read it with the easy `val`, all-NO, to catch a YES-collapse).
 
 ## Data provenance
 
@@ -120,10 +132,42 @@ Training traces come from <https://github.com/mint-philosophy/RRC_experiments> (
 pipeline). Default base model: `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B`. DeepSeek-R1 traces are
 used by default because the base was distilled from R1, so the CoT style goes with the grain.
 
-## Project conventions (from the checked-in `~/Documents/CLAUDE.md`)
+## Project conventions
 
-- Plan-first for non-trivial tasks; write the plan to `dr_rcc_replication/tasks/todo.md` with
-  checkable items and a review section, and capture corrections in `tasks/lessons.md`.
-- Simplicity and minimal-impact changes; find root causes, no temporary fixes.
-- Never mark a task done without proving it works — for this repo that means running the relevant
-  `VERIFICATION.md` stage, not just asserting correctness.
+Follow `~/Documents/CLAUDE.md` (plan-first, simplicity, minimal-impact, root-cause fixes). Repo
+specifics: write plans to `dr_rrc_replication/tasks/todo.md` and corrections to `tasks/lessons.md`;
+"proving it works" means running the relevant `VERIFICATION.md` stage (see above).
+
+## Compute & training best practices
+
+Apply these whenever writing or running training, eval, or data-generation code. The current
+de-risking run is a single-GPU LoRA SFT, but **write code that scales to the multi-GPU / RL work**
+without a rewrite.
+
+**Parallelize as much as possible.**
+- Make LLM and I/O calls **async and concurrent** — data generation (step 1), judge filtering
+  (step 2), and eval should fire batched/concurrent requests, never a synchronous loop. Bound
+  concurrency and back off on rate limits.
+- **Data parallelism** (DDP / `accelerate` / `torchrun`) to shard the batch across GPUs, and
+  **tensor parallelism** to split large models that don't fit on one card.
+- Overlap data loading with compute (`num_workers`, prefetch, sequence packing) so the GPU never
+  stalls waiting on the input pipeline.
+
+**Use every memory/throughput lever.**
+- **Flash attention** (`attn_implementation="flash_attention_2"`) for fast, memory-efficient
+  attention — especially with the longer `framed_deliberation` targets.
+- **Quantization** — 4-bit/8-bit QLoRA (`load_in_4bit`) when VRAM-bound; bf16 otherwise.
+- **LoRA/PEFT** over full fine-tuning (already the default; keep it).
+- Drive **GPUs to ~100% utilization** and **RAM/VRAM near full** — raise batch size / grad-accum /
+  packing until the run is *compute*-bound, not idle. Profile (`nvidia-smi dmon`, torch profiler)
+  to find and kill the bottleneck rather than guessing.
+
+**Break gracefully — make everything resumable.**
+- Checkpoint frequently and make every long job **resume from the last checkpoint**
+  (`resume_from_checkpoint`); cache intermediate artifacts so a crash at hour 6 costs minutes, not
+  the run. Assume RunPod spot pods get preempted.
+- Prefer idempotent, re-runnable stages (like the committed data sidecars) over one-shot state.
+
+**Observe everything.**
+- Log **all** runs to **Weights & Biases** (`report_to="wandb"`) — loss, LR, grad norm, throughput,
+  GPU/mem utilization, eval metrics, sample generations, and the full config. No un-tracked runs.

@@ -112,6 +112,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.yaml")
     cfg = load_config(ap.parse_args().config)
+    # framed_deliberation only trains hard-case deliberations, which never enter
+    # the train split under stakes_generalisation (hard is held out for test) --
+    # making the framing a silent no-op. Require random splitting.
+    if cfg["condition"] == "framed_deliberation" and cfg["split_mode"] != "random":
+        raise ValueError(
+            "condition=framed_deliberation requires split_mode=random "
+            f"(hard traces are test-only under {cfg['split_mode']!r}, so framing would do nothing)"
+        )
     results_dir = Path(cfg["data_dir"]) / "results"
     out_dir = Path(cfg["out_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)

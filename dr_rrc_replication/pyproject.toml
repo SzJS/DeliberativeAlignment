@@ -27,6 +27,7 @@ gpu = [
     "accelerate>=0.33",
     "datasets>=2.20",
     "bitsandbytes>=0.43; sys_platform == 'linux'",
+    "wandb>=0.17",
 ]
 
 # Faster LoRA (optional). Install with:  uv sync --extra gpu --extra unsloth
