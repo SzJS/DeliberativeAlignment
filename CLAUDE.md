@@ -92,15 +92,18 @@ up with no manual `export`; a real environment variable still wins over `.env`).
   **unfiltered** held-out vignettes so accuracy and the `paper_rrc` baseline are real numbers.
 - **`data_utils.py`** — the single source of truth for parsing and message construction.
   `parse_output`/`parse_answer` turn any raw text (model output OR the paper's `response_text`)
-  into a YES/NO decision, so the SFT model, the in-context baseline, and the paper's files are all
-  scored identically. `build_sft_messages` builds the context-distilled input (minimal system
-  prompt when `strip_spec: true`); `build_completion` builds the assistant target.
-- **`prompts.py`** — verbatim prompt strings from the paper (including original typos like
-  "recommendadtion", "aproximation" — **do not fix them**; the in-context baseline must reproduce
-  the paper). Also the tag constants and the minimal distillation system prompt.
+  into a YES/NO decision. Everything we generate ends in a **bare YES/NO** after `</think>`; the
+  parser also recognizes the paper's `START_OUTPUT` block so its result files score identically.
+  `build_sft_messages` builds the context-distilled input (minimal system prompt when
+  `strip_spec: true`); `build_completion` builds the assistant target.
+- **`prompts.py`** — the RRC spec (`RRC_PROMPT`) and story template are verbatim from the paper
+  (including original typos like "recommendadtion", "aproximation" — **do not fix them**; the spec
+  is still fed in-context to the `rrc_incontext` baseline). Answer formatting is **not** the
+  paper's: a single `FORMATTING_INSTRUCTIONS` asks for a bare YES/NO. Also the tag constants (kept
+  for parsing the paper's files) and the minimal distillation system prompt.
 - **`train.py`** — LoRA SFT with **manual loss masking** (labels=-100 on all prompt tokens;
   loss on the assistant target only). Reasoning target uses the base model's native
-  `<think>…</think>`; the answer uses `START_OUTPUT YES/NO END_OUTPUT`. Prefers `unsloth` and
+  `<think>…</think>`; the answer is a **bare `YES`/`NO`** (then eos). Prefers `unsloth` and
   **auto-falls back to transformers+peft** if it can't import, so a run never hard-blocks on it.
   Flash-attention (`attn_implementation`, fallback path only), W&B (`wandb_project`), and
   checkpoint resume (`resume`) are config-gated and degrade gracefully.
@@ -110,9 +113,11 @@ up with no manual `export`; a real environment variable still wins over `.env`).
 
 ### Invariants — respect these when editing
 
-- **One parser, one format.** All three answer sources must be scored by `parse_output`. If you
-  change the answer format, change `prompts.py` tag constants + `build_completion` + the parser
-  together, and re-run the `--check` loss-mask step.
+- **One parser, every source.** All answer sources are scored by `parse_output`. Everything we
+  generate uses a bare YES/NO after `</think>`; the parser additionally recognizes the paper's
+  `START_OUTPUT` block for the fixed `paper_rrc` files. If you change the generated answer format,
+  change `prompts.py` (`FORMATTING_INSTRUCTIONS`) + `build_completion` + the parser together, and
+  re-run the `--check` loss-mask step.
 - **Context distillation depends on `strip_spec`.** With `strip_spec: true` the RRC spec must NOT
   leak into the SFT input (VERIFICATION 1.4 asserts this). The model is meant to recall the
   procedure from weights.

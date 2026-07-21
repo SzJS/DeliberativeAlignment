@@ -22,8 +22,8 @@ The directory and Python import root are `dr_rrc_replication`; only the `pyproje
    `train/val/test.jsonl` + `splits.json`. The test set is built from the **unfiltered**
    held-out vignettes, so accuracy and the `paper_rrc` baseline are real numbers.
 4. **train** — LoRA SFT (unsloth if available, else transformers), bf16, completion-only loss.
-   Reasoning target uses the base model's native `<think>…</think>`; the answer uses
-   `START_OUTPUT YES/NO END_OUTPUT`.
+   Reasoning target uses the base model's native `<think>…</think>`; the answer is a bare
+   `YES`/`NO`.
 5. **evaluate** — score the SFT model vs baselines (`no_thinking`, `rrc_incontext`,
    `paper_rrc`) on the frozen test vignettes.
 

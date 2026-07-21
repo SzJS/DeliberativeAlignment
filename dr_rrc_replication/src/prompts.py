@@ -1,18 +1,24 @@
 """Verbatim prompts from the RRC_experiments paper/notebook, plus the tag
 constants and the minimal prompts used for context-distilled SFT.
 
-The paper's prompt strings are reproduced EXACTLY (including their original
-typos, e.g. "recommendadtion", "aproximation", "quesiton") so that the
-in-context prompted-RRC baseline in ``evaluate.py`` faithfully reproduces the
-paper's setup. Do not "fix" them.
+The RRC *spec* (``RRC_PROMPT``) and ``STORY_QUESTION`` are reproduced EXACTLY
+(including their original typos, e.g. "recommendadtion", "aproximation",
+"quesiton") because the spec is still fed in-context to the ``rrc_incontext``
+baseline in ``evaluate.py``. Do not "fix" them.
+
+Answer formatting, however, is NOT the paper's: every source we generate (the
+SFT target and both prompted baselines) emits a bare YES/NO after the native
+``<think>`` reasoning. The paper's ``START_OUTPUT``/``END_OUTPUT`` block survives
+only in the paper's own result files, which ``parse_answer`` still recognizes so
+the ``paper_rrc`` lookup scores correctly.
 
 Source: https://github.com/mint-philosophy/RRC_experiments (RRC_experiments.ipynb)
 """
 
 # --- Tag constants -----------------------------------------------------------
 # Reasoning uses the DeepSeek-R1-Distill native <think>...</think> markers.
-# The answer keeps the paper's START_OUTPUT/END_OUTPUT so a single parser scores
-# the SFT model, the in-context baseline, and the paper's own result files.
+# OUTPUT_OPEN/OUTPUT_CLOSE are the paper's answer tags; we no longer generate
+# them, but the parser keeps them to read the paper's own result files.
 THINK_OPEN = "<think>"
 THINK_CLOSE = "</think>"
 OUTPUT_OPEN = "START_OUTPUT"
@@ -24,22 +30,13 @@ STORY_QUESTION = """
 Here is a story for you to analyze: {story}."""
 
 # --- Formatting instructions -------------------------------------------------
-# Paper's full instructions (reasoning + answer). Used ONLY for the in-context
-# prompted-RRC baseline, which reproduces the paper verbatim.
-FORMATTING_INSTRUCTIONS_PAPER = """**Important formatting instructions**
+# Single instruction for every source we generate (SFT target + both prompted
+# baselines). Reasoning is the native <think> block, so we do NOT instruct any
+# reasoning tags; the answer is a bare YES/NO. The train/inference instruction
+# must match the target format built in ``build_completion``.
+FORMATTING_INSTRUCTIONS = """**Important formatting instructions**
 
-Output your reasoning between START_REASONING and END_REASONING. (Don't forget the END_REASONING tag!)
-
-After that, output your answer between START_OUTPUT and END_OUTPUT.
-Your answer should just be just YES or NO with no additional words."""
-
-# Answer-only instruction for context-distilled SFT and its eval. Reasoning is
-# native <think>, so we must NOT instruct START_REASONING here (train/inference
-# instruction must match the target format).
-FORMATTING_INSTRUCTIONS_ANSWER_ONLY = """**Important formatting instructions**
-
-Output your final answer between START_OUTPUT and END_OUTPUT.
-Your answer should just be YES or NO with no additional words."""
+Output your final answer as just YES or NO with no additional words."""
 
 # --- System prompts ----------------------------------------------------------
 # Minimal system prompt used for context-distilled SFT (RRC spec REMOVED, so the

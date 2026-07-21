@@ -55,11 +55,11 @@ r = json.loads(open("artifacts/train.jsonl").readline())
 txt = " ".join(m["content"] for m in r["messages"])
 print("system:", r["messages"][0]["content"][:80])
 print("RRC spec leaked into input?", "virtual bargaining" in txt.lower())  # -> False
-print("answer-only instruction present?", "START_OUTPUT" in txt and "START_REASONING" not in txt)  # -> True
+print("bare-answer instruction present?", "just YES or NO" in txt and "START_OUTPUT" not in txt)  # -> True
 print("target answer:", r["answer"])
 PY
 ```
-**Expect:** spec **not** leaked (`False`), answer-only instruction present (`True`).
+**Expect:** spec **not** leaked (`False`), bare-answer instruction present (`True`).
 
 ---
 
@@ -72,7 +72,7 @@ Set `smoke: true` in `config.yaml`, then:
 uv run python src/train.py --check
 ```
 **Expect:** the `UNMASKED` block is the assistant target only —
-`<think>…</think>\nSTART_OUTPUT YES/NO END_OUTPUT` (+ eos) — and the `MASKED` block is the
+`<think>…</think>\nYES` or `<think>…</think>\nNO` (+ eos) — and the `MASKED` block is the
 system+user prompt. If the prompt tokens appear in `UNMASKED`, stop and fix before training.
 
 ### 2.2 Overfit-a-batch (train loop is correct)
@@ -88,8 +88,8 @@ uv run python src/evaluate.py
 ```
 **Expect:** completes and writes `artifacts/metrics.json` + `eval_transcripts.jsonl`. Accuracy
 is **not** meaningful at smoke scale — you're only checking it loads base+adapter, generates,
-parses, and scores without crashing. Skim a transcript: generation should contain
-`START_OUTPUT`.
+parses, and scores without crashing. Skim a transcript: generation should end in a bare
+`YES`/`NO` after `</think>`.
 
 Set `smoke: false` again for the real run.
 
