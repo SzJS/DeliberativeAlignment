@@ -35,7 +35,7 @@ eval_steps: 25
 save_best: true                             # keep best-by-val-loss adapter
 
 # --- Logging ---
-wandb_project: null                         # set to a W&B project name to log runs (offline if no WANDB_API_KEY); null = no logging
+wandb_project: deliberative-alignment       # W&B project to log runs to (offline if no WANDB_API_KEY, autoloaded from .env); null = no logging
 resume: false                               # continue from artifacts/trainer checkpoint. Only for an interrupted SAME-config run; clear artifacts/trainer when switching smoke<->real
 
 # --- Eval ---

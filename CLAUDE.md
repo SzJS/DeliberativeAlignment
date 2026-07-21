@@ -72,7 +72,9 @@ scores without crashing. Set `smoke: false` for the real 7B run.
 ## Architecture of the SFT pipeline
 
 Data flows through `src/` modules that each own one concern; `config.yaml` drives all of them
-via `config_utils.load_config` (which applies `smoke_overrides` when `smoke: true`).
+via `config_utils.load_config` (which applies `smoke_overrides` when `smoke: true`, and autoloads
+the repo-root `.env` — gitignored — into `os.environ`, so secrets like `WANDB_API_KEY` are picked
+up with no manual `export`; a real environment variable still wins over `.env`).
 
 - **`datasets_common.py`** — schema knowledge for the paper's result workbooks. Knows the file
   list (`RESULT_FILES`: agent/development × easy/hard), sheet naming (`"{model} {approach}"`),
@@ -171,3 +173,12 @@ without a rewrite.
 **Observe everything.**
 - Log **all** runs to **Weights & Biases** (`report_to="wandb"`) — loss, LR, grad norm, throughput,
   GPU/mem utilization, eval metrics, sample generations, and the full config. No un-tracked runs.
+  The API key comes from `WANDB_API_KEY` in the gitignored `.env` (autoloaded by `load_config`);
+  the default project is `deliberative-alignment` (`wandb_project` in `config.yaml`).
+- **Save all model outputs.** Whenever a model generates text (data generation, judge filtering,
+  eval transcripts, sample generations), persist it to a file under `outputs/` — never let a
+  generation exist only in memory or scrollback. `outputs/` is git-ignored.
+- **Save all terminal outputs.** Whenever you run a command, capture its output to a file under
+  `outputs/` while still printing it to the terminal — pipe through `tee`, e.g.
+  `uv run python src/train.py 2>&1 | tee outputs/train.log`. Use `tee -a` to append when a step
+  runs in stages.

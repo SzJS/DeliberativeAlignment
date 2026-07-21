@@ -1,1 +1,11 @@
 .env
+
+# saved model + terminal outputs (see CLAUDE.md "Observe everything")
+outputs/
+
+# W&B local run dir (debug/output logs, .wandb files); runs live on wandb.ai
+wandb/
+
+# personal local Claude Code settings + atomic-write temp leftovers
+.claude/settings.local.json
+.claude/settings.local.json.tmp.*
