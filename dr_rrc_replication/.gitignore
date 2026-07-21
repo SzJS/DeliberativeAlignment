@@ -7,3 +7,6 @@ uv.lock
 # python
 __pycache__/
 *.pyc
+
+# unsloth's runtime-generated compiled kernel cache
+unsloth_compiled_cache/

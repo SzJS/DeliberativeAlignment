@@ -118,6 +118,12 @@ def load_model_and_tokenizer(cfg: dict):
         from peft import prepare_model_for_kbit_training
 
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
+    else:
+        # bf16 LoRA: the frozen base's input embeddings don't require grad, so
+        # gradient checkpointing (enabled via TrainingArguments below) would break
+        # the backward graph. Make the embedding output require grad, as
+        # prepare_model_for_kbit_training does for the 4-bit path.
+        model.enable_input_require_grads()
     lora = LoraConfig(
         r=cfg["lora_r"],
         lora_alpha=cfg["lora_alpha"],
@@ -201,9 +207,9 @@ def main() -> None:
     model.config.use_cache = False
     if hasattr(model, "print_trainable_parameters"):
         model.print_trainable_parameters()
-    # unsloth manages its own gradient checkpointing; only enable HF's on the
-    # transformers 4-bit fallback path.
-    hf_grad_ckpt = backend == "transformers" and cfg.get("load_in_4bit", False)
+    # unsloth manages its own gradient checkpointing; enable HF's on the whole
+    # transformers fallback path (bf16 too) — a 7B in bf16 OOMs on 24GB without it.
+    hf_grad_ckpt = backend == "transformers"
 
     train_ds = make_dataset(load_jsonl(out_dir / "train.jsonl"), tok, cfg["max_seq_len"], "train")
     val_ds = make_dataset(load_jsonl(out_dir / "val.jsonl"), tok, cfg["max_seq_len"], "val")
@@ -256,6 +262,8 @@ def main() -> None:
         run_name=run_name,
         seed=cfg["seed"],
         gradient_checkpointing=hf_grad_ckpt,
+        # non-reentrant checkpointing composes correctly with frozen-base LoRA
+        gradient_checkpointing_kwargs={"use_reentrant": False} if hf_grad_ckpt else None,
     )
 
     trainer = Trainer(
