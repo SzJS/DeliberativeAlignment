@@ -221,6 +221,13 @@ def main() -> None:
             os.environ["WANDB_MODE"] = "offline"
             print("[train] no WANDB_API_KEY found; logging to wandb in offline mode.")
         report_to, run_name = "wandb", f"{cfg['condition']}-{cfg['split_mode']}"
+        # Pre-init the run so the full config.yaml lands in wandb.config; the
+        # Trainer's WandbCallback then reuses this run and adds its
+        # TrainingArguments. Per-step loss/lr/grad_norm and eval_loss are logged
+        # automatically by the Trainer at logging_steps/eval_steps intervals.
+        import wandb
+
+        wandb.init(project=wandb_project, name=run_name, config=cfg)
 
     targs = TrainingArguments(
         output_dir=str(out_dir / "trainer"),

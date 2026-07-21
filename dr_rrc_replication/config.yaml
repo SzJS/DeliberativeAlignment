@@ -51,3 +51,5 @@ smoke_overrides:
   max_seq_len: 1024
   n_train: 20
   n_eval: 10
+  logging_steps: 1        # log loss/lr/grad_norm every step so the tiny run still shows curves
+  eval_steps: 1           # run eval (eval_loss) at least once at smoke scale
