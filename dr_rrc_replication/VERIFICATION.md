@@ -20,8 +20,10 @@ uv run python src/inspect_data.py
 ```bash
 uv run python src/prepare_data.py
 ```
-**Expect (random split, DeepSeek-R1, rrc_only):**
-- `training pool after malformed-drop: 319 (dropped 0)`
+**Expect (default: framed_deliberation, random split, DeepSeek-R1):**
+- `training pool after malformed-drop: 367 (dropped 0)`  (the `rrc_only` condition instead
+  gives `319` — the RRC accuracy==1 count from 1.1)
+- `examples:  train=290 val=31 test(vignettes)=47`
 - `test label base-rate (1=YES): ~0.47  (majority-class acc = ~0.53)`  ← stratified, ~balanced
 - per-slice train counts populated for all four `(domain, difficulty)` cells
 - **no assertion error** — the script hard-asserts no scenario-group overlap across splits
@@ -105,7 +107,11 @@ checkpoint is kept (`load_best_model_at_end`). Sample a generation and confirm w
 - **Success:** `sft.accuracy` ≈ `rrc_incontext.accuracy` (prompt-vs-distill on the same 7B) and
   `> no_thinking.accuracy`, at comparable/better `format_adherence`.
 - **Per-slice:** check `agent/hard` and `development/hard` — thin hard-case training data shows
-  up here. If hard slices lag, rerun with `condition: best_per_vignette`.
+  up here. The default `framed_deliberation` already trains VB deliberation (+ an RRC preamble)
+  on hard cases, so it's the richest condition; if hard slices lag, the lever is comparison, not
+  a richer condition — rerun `condition: best_per_vignette` (same traces, no preamble) to check
+  whether the framing preamble is helping or hurting, and note the number of hard `accuracy==1`
+  VB traces is inherently limited.
 - `paper_rrc.accuracy` is the paper's DeepSeek-R1 frontier number on the same held-out
   vignettes — a reference ceiling, not something the 7B distill is expected to match.
 - Sanity: every method's `accuracy` should beat its `majority_baseline` to be meaningful.

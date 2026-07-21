@@ -1,4 +1,4 @@
-# dr_rcc_replication config. Edit for smoke vs real runs.
+# dr_rrc_replication config. Edit for smoke vs real runs.
 
 # --- Data ---
 data_repo_url: "https://github.com/mint-philosophy/RRC_experiments.git"

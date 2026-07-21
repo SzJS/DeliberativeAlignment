@@ -1,7 +1,7 @@
 [project]
 name = "dr-rcc-replication"
 version = "0.1.0"
-description = "SFT-trained replication of the RCC/RRC moral-reasoning experiment (context distillation)"
+description = "SFT-trained replication of the RRC (Resource-Rational Contractualism) moral-reasoning experiment (context distillation)"
 requires-python = ">=3.10"
 
 # Lightweight deps needed for data prep + eval scoring. These run CPU-only, so
