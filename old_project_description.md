@@ -1,3 +1,5 @@
+Warning: the following information is outdated!
+
 This project aims to move towards a pluralistic target of alignment, based on this paper: https://arxiv.org/abs/2506.17434.
 - Alignment target = collective deliberation. The paper's answer to "align to what?" is contractualist: an AI should do what the affected parties would agree to if they deliberated together under fair conditions. Pluralism here isn't averaging individual preferences — it's aligning to what a group would collectively endorse.
 - You can't actually run that deliberation, so you approximate it. Real agreement among diverse stakeholders is slow and costly, and often impossible to convene. So the target is treated as an ideal that AI systems approximate rather than compute exactly.
