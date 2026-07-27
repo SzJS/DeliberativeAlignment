@@ -1,0 +1,212 @@
+# dr_rrc_sdf config.
+#
+# Sectioned by stage, unlike dr_rrc_replication's flat file. Two training stages means keys
+# like `epochs`, `learning_rate` and `max_seq_len` collide, so a flat namespace can't express
+# the run. See `smoke:` at the bottom for how overrides reach into nested sections.
+
+seed: 0
+wandb_project: deliberative-alignment   # null disables W&B. Offline if WANDB_API_KEY is unset
+                                        # (autoloaded from the git-ignored repo-root .env)
+
+paths:
+  artifacts: artifacts                  # stage outputs, checkpoints, splits (git-ignored)
+  outputs: outputs                      # API response cache, generation log, tee'd terminal logs (git-ignored)
+  assets: assets                        # committed reproducibility anchors
+  data: data                            # downloaded source data (git-ignored)
+
+# --- Model ------------------------------------------------------------------
+model:
+  base: "ibm-granite/granite-4.1-8b-base"
+  # Dense GraniteForCausalLM (only the 30B in the 4.1 line is hybrid Mamba-2, so no mamba-ssm).
+  # 40 layers, hidden 4096, 32 heads / 8 KV, vocab 100352, tie_word_embeddings: true, bf16.
+  chat_template: "granite_chat_template.jinja"   # under paths.assets; base model ships none.
+                                        # Its markers are ALREADY in the base vocab, so
+                                        # installing it needs no embedding resize. See assets/README.md.
+  max_seq_len: 4096
+  attn_implementation: "kernels-community/flash-attn2"   # | sdpa | eager
+                                        # transformers backend only; unsloth uses its own kernels
+  load_in_4bit: false                   # QLoRA when VRAM-bound; bf16 otherwise
+  backend: "transformers"               # transformers | unsloth
+                                        # `unsloth` requires the SEPARATE .venv-unsloth (it cannot
+                                        # coexist with vllm — see pyproject). Run training stages
+                                        # there via `run_all.sh --train-venv .venv-unsloth`.
+                                        # LoRA ONLY: unsloth does not accelerate the full-FT SDF
+                                        # default, so modeling.py must ignore it when
+                                        # sdf_train.full_finetune is true rather than silently
+                                        # producing a slower run than the plain path.
+
+# --- Generation (both pipelines, via OpenRouter) ----------------------------
+generation:
+  base_url: "https://openrouter.ai/api/v1"   # OpenRouter is OpenAI-API-compatible -> async openai SDK
+  api_key_env: "OPENROUTER_API_KEY"          # NOTE: the repo-root .env is currently empty. preflight.sh checks this.
+  max_concurrency: 16
+  max_retries: 8                             # our own tenacity backoff; the SDK's is disabled so retries are observable
+  timeout_s: 180
+  max_cost_usd: 50.0                         # HARD STOP. A generation bug must not be able to burn the budget.
+  models:                                    # TODO: pick these. Cheap models for the fan-out stages,
+                                             # a strong one for document writing and judging.
+                                             # Keys are named after the functions that consume them.
+    stage1_domains: null                     # generation/sdf.py
+    stage2_doc_types: null
+    stage3_assertions: null
+    stage4_ideas: null
+    stage5_document: null                    # ~99% of the spend — this is the one that matters
+    vignette: null                           # generation/vignettes_generated.py
+    cot: null                                # generation/cot.py
+    judge: null                              # generation/judge.py
+
+# --- Stage 1: SDF corpus generation (MSM's hierarchical pipeline) -----------
+sdf:
+  spec_path: "rrc_spec.md"              # under paths.assets. PLACEHOLDER — nothing generates until it exists.
+  # Corpus size is the PRODUCT of the hierarchy: one document per
+  # (domain x subdomain x doc_type x idea) = 8 x 4 x 5 x 6 = 960 documents.
+  # There is no separate target_docs knob — a target that disagreed with the hierarchy would
+  # silently either truncate stage 5 or be ignored. Resize by changing these four numbers, and
+  # note that smoke mode must shrink ALL FOUR or a smoke run costs the same as a real one
+  # (stage 5 is ~99% of the spend).
+  n_domains: 8                          # MSM biases toward fewer BROAD domains over many narrow ones
+  n_subdomains: 4
+  n_doc_types: 5
+  n_ideas: 6
+  doc_words: [500, 1200]
+  filters:
+    min_words: 300
+    near_dup_threshold: 0.85            # MinHash/embedding dedup. Diversity collapse is the main
+                                        # failure mode of hierarchical generation at small scale.
+  replay:                               # generic pretraining text mixed into the SDF corpus to
+    dataset: null                       # counter catastrophic forgetting from a narrow corpus.
+    fraction: 0.3                       # TODO: pick a dataset. Distinct from sft.instruction_mix —
+                                        # that is instruction data in the SFT stage; this is raw text here.
+
+# --- Stage 2: SDF training (continued pretraining) --------------------------
+sdf_train:
+  # No `enabled` flag: skipping this stage is `--arm sft_only` (or `--skip sdf_train`), and two
+  # mechanisms for the same thing is how they end up disagreeing.
+  full_finetune: true                   # MSM trains the corpus like pretraining data. LoRA may lack the
+                                        # capacity to install knowledge rather than style — see the risk
+                                        # noted in experiment_description.md. 8B full FT needs FSDP.
+  lora:                                 # used only when full_finetune: false
+    r: 64                               # higher than the SFT rank: installing knowledge, not a response style
+    alpha: 128
+    dropout: 0.0
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+                                        # Granite is Llama-shaped, so this list ports unchanged.
+                                        # NEVER add lm_head or embed_tokens: tie_word_embeddings is true.
+  block_size: 4096                      # packed fixed-length blocks
+  packing: true
+  epochs: 2
+  learning_rate: 1.0e-5                 # NOT dr_rrc_replication's 1e-4. Granite has logits_scaling: 16.0,
+                                        # which flattens the softmax and changes loss magnitude and
+                                        # effective LR relative to Llama-likes. Sweep before trusting.
+  per_device_batch_size: 1
+  grad_accum_steps: 16
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  logging_steps: 10
+  save_steps: 200
+  resume: true
+
+# --- Stage 3: SFT data generation (deliberative alignment steps 1-2) --------
+sft_data:
+  vignette_source: "paper"              # paper | generated
+  paper:
+    repo_url: "https://github.com/mint-philosophy/RRC_experiments.git"
+    subdir: "RRC_experiments"           # cloned under paths.data. Do NOT point at
+                                        # ../dr_rrc_replication/data — that is git-ignored and may not exist.
+  generated:
+    n_vignettes: 400
+    hard_fraction: 0.5
+  strip_spec: true                      # context distillation: spec removed from the SFT input
+  cot:
+    n_samples_per_vignette: 4           # rejection-sampling headroom for the judge filter
+    temperature: 1.0
+  judge:
+    rubric_path: "judge_rubric.md"      # under paths.assets
+    threshold: 0.75
+    filter_spec_leakage: true           # CoTs are generated WITH the spec and trained WITHOUT it, so
+                                        # "as the policy above states" becomes a dangling reference.
+  instruction_mix:                      # MSM's AFT recipe: spec data + public instruction data.
+    dataset: null                       # TODO: pick one (licence + size check). See experiment_description.md.
+    split: "train"
+    n_examples: 20000
+    ratio: null                         # if set, overrides n_examples as a fraction of the RRC set
+  split_mode: "random"                  # random | stakes_generalisation
+  split_ratios: [0.8, 0.1, 0.1]
+
+# --- Stage 4: SFT training --------------------------------------------------
+sft_train:
+  init_from: "sdf"                      # sdf | base. "sdf" loads artifacts/models/merged_sdf.
+                                        # LOAD-BEARING: stacking a second LoRA on an UNMERGED first
+                                        # adapter silently trains against the base model.
+  use_lora: true
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  epochs: 3
+  learning_rate: 1.0e-5                 # see the logits_scaling note under sdf_train
+  per_device_batch_size: 2
+  grad_accum_steps: 8
+  warmup_ratio: 0.03
+  weight_decay: 0.0
+  logging_steps: 5
+  eval_steps: 25
+  save_best: true
+  resume: true
+
+# --- Stage 5: Eval (inspect_ai) ---------------------------------------------
+eval:
+  arms: ["sdf_sft", "sft_only", "sdf_only"]
+  # sdf_sft   — the full pipeline (treatment)
+  # sft_only  — no SDF. Isolates what the document stage buys.
+  # sdf_only  — SFT's own initialisation checkpoint, so this arm costs no extra training. Without
+  #             it an sdf_sft > sft_only gap can't be attributed to SDF rather than to extra steps.
+  # Available but not enabled: "base" (floor), "spec_in_context" (prompt-vs-train control).
+  tasks: ["rrc_decision", "rrc_procedure", "spec_recall"]
+  # rrc_decision  — YES/NO accuracy. NOT the headline metric: the vignette set is separable by
+  #                 difficulty (all hard are YES, all easy NO), so accuracy alone cannot show
+  #                 that deliberation CONTENT helps.
+  # rrc_procedure — model-graded: was the right approximation selected, and actually executed?
+  # spec_recall   — what SDF installed, measured independently of SFT.
+  log_dir: "eval/logs"                  # under paths.artifacts. inspect eval_set() resumption anchor.
+  grader_model: null                    # TODO: an openrouter/ model for the model-graded scorers
+  serve: "vllm"                         # vllm | vllm_server | hf
+                                        # vllm        — in-process, needs `--extra vllm`
+                                        # vllm_server — talk to an already-running vLLM OpenAI-
+                                        #               compatible endpoint. THIS is the mode to
+                                        #               use alongside the unsloth training venv,
+                                        #               since it puts vLLM out of process entirely.
+                                        # hf          — inspect's hf/local; slow, no extra deps
+  serve_base_url: null                  # required when serve: vllm_server (e.g. http://localhost:8000/v1)
+  limit: null                           # cap samples per task (debugging)
+  epochs: 1                             # inspect Task(epochs=): samples per item. >1 with
+                                        # gen_temperature 0 is pure waste; raise both together.
+  gen_temperature: 0.0                  # greedy, for reproducibility across arms
+
+# --- Smoke mode -------------------------------------------------------------
+# Overrides are DOTTED PATHS applied deep into the nested config, and each path must ALREADY
+# EXIST — a typo raises instead of silently adding a dead key (a live bug class in
+# dr_rrc_replication, where a flat cfg.update() would happily accept `epocs: 1`).
+smoke:
+  enabled: false
+  overrides:
+    model.base: "ibm-granite/granite-4.1-3b-base"   # same architecture, same tokenizer, same role
+                                                    # tokens — so the format code path is IDENTICAL at smoke scale
+    model.max_seq_len: 1024
+    # ALL FOUR hierarchy knobs, not just one: corpus size is their product (2 x 2 x 2 x 2 = 16
+    # documents). Shrinking only one would leave a "smoke" run costing nearly a real one.
+    sdf.n_domains: 2
+    sdf.n_subdomains: 2
+    sdf.n_doc_types: 2
+    sdf.n_ideas: 2
+    sdf_train.full_finetune: false
+    sdf_train.epochs: 1
+    sdf_train.block_size: 1024
+    sdf_train.logging_steps: 1
+    sft_data.cot.n_samples_per_vignette: 1
+    sft_data.instruction_mix.n_examples: 20
+    sft_train.epochs: 1
+    sft_train.logging_steps: 1
+    sft_train.eval_steps: 1
+    eval.limit: 5

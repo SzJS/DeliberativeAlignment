@@ -1,0 +1,11 @@
+{
+  "_TODO": "PLACEHOLDER. Written by `generation/sdf_pipeline.py --emit-manifest` from SDF stages 1-4 (domains -> document types -> character assertions -> document ideas). Committed because those stages are cheap but fully determine the corpus, while the stage-5 documents themselves are large and git-ignored. Same role as dr_rrc_replication/assets/framed_deliberation.json.",
+  "_schema": {
+    "spec_sha256": "sha256 of assets/rrc_spec.md at generation time — regenerate if it changes",
+    "generated_with": {"model": "", "temperature": 0, "pipeline_version": ""},
+    "domains": [{"name": "", "subdomains": [{"name": "", "document_types": [], "assertions": [], "ideas": []}]}]
+  },
+  "spec_sha256": null,
+  "generated_with": null,
+  "domains": []
+}

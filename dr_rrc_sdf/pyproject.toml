@@ -1,0 +1,131 @@
+[project]
+name = "dr-rrc-sdf"
+version = "0.1.0"
+description = "SDF (synthetic document finetuning) + SFT of a Granite 4.1 base model on resource-rational contractualism"
+requires-python = ">=3.11"   # asyncio.TaskGroup, used by the bounded-concurrency generator
+
+# CPU-only: both data-generation pipelines, data prep, and eval authoring. These run
+# anywhere (laptop included) — only training and local inference need `--extra gpu`.
+dependencies = [
+    "openai>=2.45,<3",          # async client pointed at OpenRouter (OpenAI-API-compatible)
+    "inspect-ai>=0.3.240,<0.4", # eval framework; also ships an `openrouter/` provider
+    "tenacity>=9,<10",          # retry/backoff. Already an inspect-ai dep, so no new resolution risk
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",       # load_env() -> OPENROUTER_API_KEY, WANDB_API_KEY from repo-root .env
+    "tqdm>=4.66",
+    "numpy>=2.1",               # dr_rrc_replication's `numpy<2` pin existed only for its torch 2.5 stack
+    "pandas>=2.2",              # sft_data.vignette_source == "paper": read the RRC xlsx workbooks
+    "openpyxl>=3.1",            # ditto
+    "datasets>=5.0,<6",         # CPU-side: pull the public instruction-tuning mix for SFT
+]
+# NOT carried over from dr_rrc_replication: scikit-learn. It is in that pyproject but imported
+# nowhere in its src/ or scripts/ — a dead dependency. Don't inherit it.
+
+# ---------------------------------------------------------------------------
+# GPU stack.  uv sync --extra gpu            (training)
+#             uv sync --extra gpu --extra vllm   (training + fast local eval)
+#
+# A coherent dependency set needs ONE anchor. dr_rrc_replication's anchor was `unsloth`, which
+# is why every version there is old and mutually load-bearing. THIS experiment anchors on
+# **vLLM**, because vLLM is what makes the inspect-based eval fast: inspect_ai serves LoRA
+# adapters natively via `vllm/BASE:adapter`, batches automatically, and offers a
+# `vllm-completions/` raw-prompt provider for base-model arms. The alternative — inspect's
+# `hf/local` provider — is a synchronous generate() loop, exactly the pattern CLAUDE.md forbids,
+# across 3 tasks x 5 arms.
+#
+# Consequence: vllm 0.26 pins `torch==2.11.0` EXACTLY, so `gpu` must agree or the two extras
+# cannot coexist in one venv. That single constraint sets the floor and ceiling below.
+#
+# TRIPWIRE: if vLLM bumps its torch pin, bump `gpu` in the SAME commit, or delete the `vllm`
+# extra. Do not let them drift — a silent mismatch shows up as an unresolvable `uv sync` on
+# RunPod at the start of a run.
+#
+# FALLBACK if you drop the `vllm` extra: torch>=2.13,<2.14, everything else unchanged, and eval
+# runs through `hf/local` with LoRA arms merged to disk first (training/merge.py already does
+# the merge for the SFT-init path, so this costs disk, not code).
+#
+# NONE OF THESE RANGES HAS BEEN INSTALLED OR RESOLVED YET — this repo has only ever run on CPU.
+# The first `uv sync --extra gpu` on RunPod is the real test; expect to adjust and then commit
+# the resulting uv.lock (which, unlike in dr_rrc_replication, is NOT git-ignored here).
+[project.optional-dependencies]
+gpu = [
+    "torch>=2.11,<2.12",        # ANCHOR: equals vllm 0.26's exact pin
+    "transformers>=5.10,<6",    # floor is vllm's >=5.5.3 + margin; `models/granite` is still first-class in v5
+    "trl>=1.9,<2",              # SFT stage. Requires transformers>=4.56.2, accelerate>=1.4, datasets>=4.7 — all satisfied
+    "peft>=0.19,<0.20",         # LoRA on both stages + merge_and_unload. A one-minor window is
+                                # tight for a stack anchored on a torch this new; if resolution
+                                # fails here, widen to <0.21 and re-check merge_and_unload rather
+                                # than moving torch, which is pinned by vllm.
+    "accelerate>=1.14,<2",      # DDP/FSDP for the multi-GPU path. No <1.6 ceiling: that existed only because
+                                # unsloth-zoo recompiled Accelerator.prepare and broke on FP8BackendType
+    "kernels>=0.6",             # attn_implementation="kernels-community/flash-attn2" — loads FA2 from the Hub
+                                # instead of compiling flash-attn against a fresh torch (the fragility that made
+                                # dr_rrc_replication leave flash-attn out of its extras entirely)
+    "bitsandbytes>=0.50; sys_platform == 'linux'",
+    "wandb>=0.28",
+]
+vllm = ["vllm>=0.26,<0.27"]     # local serving for eval; same torch 2.11 pin as `gpu` by construction
+
+# ---------------------------------------------------------------------------
+# SECOND, MUTUALLY EXCLUSIVE TRAINING STACK: unsloth. Lives in its OWN venv.
+#
+#   uv sync --extra gpu --extra vllm                                  # .venv          (gen, eval, serving)
+#   UV_PROJECT_ENVIRONMENT=.venv-unsloth uv sync --extra gpu-unsloth  # .venv-unsloth  (training)
+#
+# unsloth CANNOT coexist with the `gpu`/`vllm` stack in one environment. Verified from PyPI:
+#     unsloth 2026.7.5 : transformers<=5.5.0, trl<=0.24.0, datasets<4.4.0, torch<2.12
+#     vllm     0.26.0  : transformers>=5.5.3, torch==2.11.0
+# No transformers version satisfies both, and unsloth additionally caps trl below 1.0 and
+# datasets below 5.0.
+#
+# So it gets its own venv rather than its own compromise. Training runs there (unsloth's LoRA
+# kernels: ~2x faster, materially lower VRAM); vLLM stays in the default venv and inspect reaches
+# it over HTTP as an OpenAI-compatible server, which is why the two never need to meet. Point
+# run_all.sh at it with `--train-venv .venv-unsloth` and set `eval.serve: vllm_server`.
+#
+# SCOPE: unsloth is LoRA-only. The SDF stage DEFAULTS to full-parameter FT
+# (sdf_train.full_finetune: true), which unsloth does not accelerate — this extra buys the SFT
+# stage and the LoRA SDF fallback. If you never run LoRA, you do not need this venv at all.
+#
+# The pins mirror unsloth's own caps rather than being independently chosen; going past a cap is
+# exactly what breaks it.
+gpu-unsloth = [
+    "unsloth>=2026.7,<2027",
+    "unsloth-zoo>=2026.7,<2027",
+    "torch>=2.11,<2.12",         # inside unsloth's <2.12 AND equal to the other stack's pin, so
+                                 # checkpoints written in one venv load in the other
+    "transformers>=5.4,<=5.5.0", # unsloth's ceiling
+    "trl>=0.18.2,<=0.24.0",      # PRE-1.0 trl — see the note below about the trainer
+    "peft>=0.19,<0.20",
+    "accelerate>=1.10",
+    "datasets>=4.2,<4.4",        # unsloth's ceiling
+    "bitsandbytes>=0.50; sys_platform == 'linux'",
+    "wandb>=0.28",
+]
+
+# Tell uv the stacks are irreconcilable, so it locks each separately instead of failing to
+# resolve their union.
+[tool.uv]
+conflicts = [
+    [{ extra = "gpu" }, { extra = "gpu-unsloth" }],
+    [{ extra = "vllm" }, { extra = "gpu-unsloth" }],
+]
+
+# CONSEQUENCE FOR THE TRAINER CODE: trl's API changed across 1.0, so `training/train_sft.py` has
+# to run under trl 0.2x (unsloth venv) AND trl 1.x (default venv). Keep the trl surface area
+# small — prefer a plain `Trainer` plus our own collator over SFTTrainer-specific arguments — so
+# the version gap stays a detail rather than a fork. `training/modeling.py` owns the
+# unsloth-vs-transformers load branch; no other module should know which venv it is running in.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# src-layout: hatchling auto-discovers src/dr_rrc_sdf/. `uv sync` installs it editable, so
+# `from dr_rrc_sdf.data_utils import ...` resolves from ANY cwd and ANY launcher.
+#
+# This is a deliberate departure from dr_rrc_replication, which sets `package = false`, ships no
+# __init__.py, and relies on run_all.sh exporting PYTHONPATH=<parent dir>. That arrangement
+# breaks `uv run python src/train.py` from a shell, breaks accelerate launch / torchrun, and —
+# fatally for this experiment — breaks `inspect eval`, which loads task files by path in its own
+# process with its own sys.path. Hence a real package, and NO PYTHONPATH export in run_all.sh.
