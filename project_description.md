@@ -11,9 +11,7 @@ This overall idea is called *resource-rational contractualism* (RRC).
 
 In this project, we will implement two heuristic approximations of RRC: rules and values. Rules correspond to what is learned in *deliberative alignment*: https://arxiv.org/abs/2412.16339
 
-Rules (i.e. concrete instructions for the AI to follow) are imperfect approximations of the contractualist ideal — stakeholder deliberation. As a result, we want a more accurate approximation to fall back into when the rules fall short or when the situation is high-stakes and/or novel. In this project, we will use reasoning over the values (i.e. abstract action-guiding principles) of the stakeholders as our second-level approximation. Values are on the second level because abstract principles carry the reasons behind the rules, so they extend to cases the rulebook didn't anticipate. Another reason we are interested in values is that they can be encoded in a public constitution: a full model spec can be extremely long, while a value-based constitution is short enough that people can easily inspect it and vote about its contents.
-
-Note that we could use stakeholder deliberation, but simulated deliberation feels disempowering to humans — it represents a societal move away from involving humans at all. Publicly inspectable and debatable values seems like a more human-centric system, where humans are in the loop by design. Moreover, we can also understand our proposed system to be a prototype of a more advanced RRC system, which includes rules, values and simulated deliberation. In other words, values are chosen for their legitimacy-preserving properties, accepting some fidelity cost.
+Rules (i.e. concrete instructions for the AI to follow) are imperfect approximations of the contractualist ideal — stakeholder deliberation. As a result, we want a more accurate approximation to fall back into when the rules fall short or when the situation is high-stakes and/or novel. In such situations, the LLM will simulated stakeholder deliberations, in line with RRC.
 
 ## Background
 
@@ -57,10 +55,6 @@ Data generation pipeline (hierarchical, to get volume without collapsing diversi
 ## Training pipeline
 
 The training pipeline for this project is planned as follows:
-1. SDF
-    - Documents to teach the model the meta-rule (i.e. the two-level alignment system we described above)
-    - Documents to teach the values
-    - Documents to teach the rules
-2. SFT
-    - Examples of rule following
-    - Examples of value deference (i.e. violating the rules to satisfy the values)
+1. SDF (~=MSM, Teaching Claude Why)
+    - Documents to teach the model about RRC
+2. SFT (~=Deliberative alignment)
