@@ -37,6 +37,10 @@ The two are **self-contained and deliberately do not share code** — their depe
 physically incompatible (see below), and experiment 1 is a finished experiment whose numbers must
 stay reproducible. Shared prose lives at the repo root; tooling does not.
 
+Root prose: `project_description.md` is the current thesis and the only one to read.
+`old_project_description.md` is a **deprecated earlier framing kept for history — do not build
+from it**. Root `README.md` is a one-line stub.
+
 > ⚠️ **The invariants in each experiment's section below are scoped to that experiment.** In
 > particular experiment 1's `<think>` tags, `START_OUTPUT` parsing, and unsloth pins are
 > DeepSeek-R1-Distill artifacts and must not be carried into `dr_rrc_sdf`.
@@ -137,6 +141,20 @@ the repo-root `.env`, gitignored, into `os.environ`).
 `raise NotImplementedError`. **Nothing has been executed** — no training, no downloads, no API
 calls, and the dependency ranges have never been resolved.
 
+`assets/` follows the same rule: `granite_chat_template.jinja` is a real vendored file, but
+`rrc_spec.md`, `judge_rubric.md` and `sdf_manifest.json` are **placeholders carrying a TODO
+block**, not content.
+
+**Blocking decisions — nothing downstream can run until these land** (the live list is
+`tasks/todo.md`; this is the summary):
+
+1. **Write `assets/rrc_spec.md`.** Blocks every generation stage. See the invariant below for the
+   constraint it has to satisfy.
+2. **Set `OPENROUTER_API_KEY`** in the repo-root `.env` — it currently holds `HF_TOKEN` only.
+3. **Pick `generation.models` per stage** (all `null`), then price the run with `--dry-run`.
+   Stage 5 is ~99% of the spend.
+4. **Pick `sdf.replay`'s dataset** (`null`) — generic raw text, distinct from the instruction mix.
+
 Read `dr_rrc_sdf/experiment_description.md` for the design and pre-registered risks,
 `VERIFICATION.md` for the (written, unexecuted) checklist, and `tasks/todo.md` for what's next.
 
@@ -152,6 +170,9 @@ bash scripts/preflight.sh               # secrets, spec, GPU, disk. No API calls
 bash scripts/run_all.sh                 # the sdf_sft arm
 bash scripts/run_all.sh --arm sft_only  # the ablation arm (SDF stages auto-skipped)
 bash scripts/run_all.sh --dry-run       # print the plan, run nothing
+bash scripts/run_all.sh --only eval     # run just these stages (repeatable)
+bash scripts/run_all.sh --skip sdf_gen  # run everything except these (repeatable)
+bash scripts/run_all.sh --force         # ignore the stamps in artifacts/.stamps/
 ```
 
 **Seven stages** (`sdf_gen → sdf_train → merge_sdf → sft_gen → sft_train → merge_sft → eval`),
@@ -172,7 +193,9 @@ anything at all). `base` and `spec_in_context` exist but are off by default.
 - **One spec, three consumers, byte-identical.** `prompts.RRC_PROMPT` feeds the `spec_in_context`
   arm, the SFT CoT generation prompt, and (as a verbatim substring) `assets/rrc_spec.md`, the SDF
   corpus seed. Any edit makes the arms non-comparable; an edit after generation invalidates the
-  corpus. `spec_sha256()` goes into every artifact manifest.
+  corpus. `spec_sha256()` goes into every artifact manifest. **`rrc_spec.md` has not been written
+  yet** — it is a placeholder, and the containment relation above is what writing it must
+  establish (`generation/spec.py` is scaffolded to assert it).
 - **Merge is load-bearing, not a convenience.** SFT must initialise from *merged* SDF weights.
   Stacking a second LoRA on an unmerged first adapter silently trains against the base model —
   a clean run and a null SDF result that is actually a plumbing bug, with no error message.
