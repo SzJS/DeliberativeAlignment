@@ -232,6 +232,61 @@ Follow `~/Documents/CLAUDE.md` (plan-first, simplicity, minimal-impact, root-cau
 specifics: write plans to the relevant experiment's `tasks/todo.md` and corrections to
 `tasks/lessons.md`; "proving it works" means running the relevant `VERIFICATION.md` stage.
 
+### Propose and justify run parameters before launching
+
+No run starts on defaults-by-inertia. Before any training, generation, or eval run, write out the
+full parameter set you intend to use and justify **every value — including the ones inherited
+unchanged from the committed `config.yaml`.** A number is not justified by having been in the
+config; say why it is right for *this* run. Ground each justification in the model card, the
+source paper, or VRAM/token arithmetic — never in vibes — and flag explicitly when a value is a
+guess, or a carried-over default nobody has re-examined. Get the user's sign-off, then persist the
+proposal as the **Parameters** section of that run's hand-off file, so the reasoning outlives the
+session that produced it.
+
+Granite makes this load-bearing rather than ceremonial: `logits_scaling: 16.0` changes loss
+magnitude and effective LR, so experiment 1's `1e-4` does not transfer. An unjustified LR here is
+a silent bug, not a stylistic choice.
+
+### Write a hand-off file after every run
+
+When a run finishes — **or dies** — write `outputs/<run_id>/handoff.md` next to that run's logs
+(git-ignored, like everything under `outputs/`).
+
+The hand-off exists so that **another model, holding none of this session's context, can pick up
+exactly where the experiment left off** — resume the pipeline, or take the next decision — without
+re-deriving anything. Write to that bar: name paths, shas, and literal commands rather than
+referring to "the run" or "the usual config", and assume the reader has read this file and nothing
+else. Sections:
+
+- **Parameters** — the approved proposal above, plus anything you actually changed mid-flight.
+- **What ran** — stages executed vs. skipped, arm, base checkpoint, commit sha, `spec_sha256()`,
+  wall-clock, W&B run URL.
+- **Results** — headline metrics and where the artifacts landed (adapter, merged weights, eval logs).
+- **What surprised you** — divergence from expectation, loss spikes, judge reject rate, anything
+  that smelled wrong. This is the highest-value section; do not skip it when the run "just worked".
+- **Next** — the concrete next action (the literal command where there is one), what is safe to
+  resume from, and what you would *not* repeat.
+
+A preempted or failed run gets a hand-off too. Where it died, and which stamps in
+`artifacts/.stamps/` are trustworthy, is exactly what the next session needs most.
+
+### Have a second Claude attack the experiment, not just the code
+
+The `Plan` and `code-reviewer` reviews mandated by `~/Documents/CLAUDE.md` are unchanged; they look
+at code. This adds a *research* critique on top, at two points: before committing to an expensive
+run, and after results land but before they are written up as a finding.
+
+- Spawn an **independent** subagent with the artifact (design, config, metrics, transcripts) and
+  the instruction to **refute** it: find the confound, the missing ablation, the metric that cannot
+  support the claim. Never ask "does this look good?" — a confirmatory prompt returns confirmation
+  and teaches you nothing.
+- Give it enough context to be dangerous, including the dataset caveat above. The YES/NO label
+  confound is precisely what a fresh critic should catch unaided; a critic that misses it is a
+  signal about the critique, not a clean bill of health.
+- **A critic's verdict is evidence, not an order.** Weigh it, state where you disagree and why, and
+  record what you rejected in the hand-off. Do not rewrite a sound design because a subagent
+  sounded confident.
+
 ## Compute & training best practices
 
 Apply these whenever writing or running training, eval, or data-generation code. Current work is
