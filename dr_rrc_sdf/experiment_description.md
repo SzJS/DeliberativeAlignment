@@ -58,29 +58,68 @@ is deliberately out of scope**, as in experiment 1, to cut cost.
 
 | | `dr_rrc_replication` | `dr_rrc_sdf` |
 |---|---|---|
-| Base | DeepSeek-R1-Distill-Qwen-7B (instruct, reasoning-distilled) | `granite-4.1-8b-base` (**base**) |
+| Base | DeepSeek-R1-Distill-Qwen-7B (instruct, reasoning-distilled) | `granite-4.1-8b` (**instruct**) |
 | Stages | SFT only | **SDF → SFT** |
-| SFT data | the paper's published traces | **generated + judge-filtered by us**, plus a public instruction mix |
+| SFT data | the paper's published traces | **generated + judge-filtered by us**, plus MSM's Table 2 instruction mix |
 | Eval | hand-rolled `evaluate.py` | **`inspect_ai`** |
 | Accelerator | unsloth (pinned the whole stack) | vLLM anchors; unsloth optional, in its **own venv** |
 
-**Why a base model.** SDF is a pretraining-style intervention. Applying it to an already
-instruction-tuned model means competing with whatever alignment training that model already
-received, and makes "what did the documents install?" unanswerable. The cost is that the model
-has no instruction-following ability at all, which is why the SFT stage carries a public
-instruction mix (MSM's AFT recipe).
+**Why an instruct model.** This reverses an earlier decision to build on `granite-4.1-8b-base`,
+and the reversal follows MSM. Their headline safety result (§4–5) midtrains *production Instruct*
+models — Qwen2.5-32B-Instruct and Qwen3-32B — and reports the agentic-misalignment reduction
+(54%→7% on Qwen3-32B) on those. Only the small cheese-preference study in their §3 uses a base
+model. The result we are trying to transfer is the §4–5 one, so we should match its setting.
 
-**Why instruction data in SFT, not SDF.** The SDF corpus is trained exactly like pretraining
-data — that is MSM's mechanism claim. Injecting chat formatting there would defeat it. A separate
-knob (`sdf.replay`) mixes generic *raw text* into SDF to counter forgetting; that is a different
-thing.
+The cost is real and worth stating plainly, because it is exactly what the earlier base-model
+argument was guarding against: SDF is a pretraining-style intervention, and running it on an
+already-aligned checkpoint means the documents compete with whatever alignment training that
+checkpoint received. "What did the documents install?" is a harder question when the model's
+priors about how to behave are not blank.
+
+Three things make that acceptable:
+
+- The **`sdf_only` arm measures exactly this.** It evaluates SDF's own checkpoint, so an
+  above-floor `spec_recall` is direct evidence the documents installed something the instruct
+  model did not already have. That arm was already in the design and is free; the model switch
+  promotes it from a sanity check to the load-bearing control.
+- **Both SFT arms train on an identical dataset at an identical seed**, so whatever the instruct
+  checkpoint brings, it is held constant across the `sdf_sft` vs `sft_only` contrast that SDF is
+  actually measured by.
+- **MSM demonstrated this setting works** on models that had already been alignment-trained, which
+  is the empirical answer to the objection.
+
+The benefit is that we no longer have to install general instruction-following from scratch on top
+of a few hundred RRC vignettes — a demand the base model made, and one the RRC dataset is far too
+small to meet on its own.
+
+**Why instruction data in SFT, not SDF.** The conclusion is unchanged by the switch; the *reason*
+is not. It is no longer "the base model cannot follow instructions at all". It is now MSM's own
+§4–5 rationale: midtraining on a narrow synthetic corpus degrades an Instruct model's general
+coherence, and a fixed instruction mix in the subsequent fine-tune repairs it. MSM used 2M tokens
+for precisely this, and said so — "mostly to fix incoherence caused by midtraining on Instruct
+models" (Appendix B.3). We take their Table 2 mix verbatim; see `config.yaml`
+`sft_data.instruction_mix` and the provenance table in `README.md`.
+
+The mechanism argument stands on its own either way: the SDF corpus is trained exactly like
+pretraining data — that is MSM's mechanism claim — and injecting chat formatting there would
+defeat it. A separate knob (`sdf.replay`) mixes generic *raw text* into SDF to counter forgetting;
+that is a different thing.
+
+**What the switch does not change.** `granite-4.1-8b` and `granite-4.1-8b-base` are the same
+architecture: 40 layers, hidden 4096, vocab 100352, `tie_word_embeddings: true`,
+`logits_scaling: 16.0`, `pad` (100256) ≠ `eos` (100257). Every Granite invariant in CLAUDE.md
+carries over untouched. The one practical difference is that the instruct checkpoint ships its own
+chat template, so the vendored `assets/granite_chat_template.jinja` stops being *required* and
+becomes purely a reproducibility anchor — `data_utils.install_chat_template` overwrites the
+model's own with the vendored one and warns when they differ, which is the behaviour we want:
+an upstream template edit must not silently re-render every training example.
 
 ## 4. Comparison arms
 
 | arm | what it is | what it answers |
 |---|---|---|
 | `sdf_sft` | full pipeline | the treatment |
-| `sft_only` | SFT from base, no SDF | **what did SDF buy?** |
+| `sft_only` | SFT from the untouched `granite-4.1-8b` instruct checkpoint, no SDF | **what did SDF buy?** |
 | `sdf_only` | SFT's own init checkpoint | **did SDF install anything at all?** (free — the checkpoint already exists) |
 | `base` | untrained (available, off) | floor |
 | `spec_in_context` | spec prompted, untrained (available, off) | prompt vs train |

@@ -20,9 +20,8 @@ model:
   # The INSTRUCT model. IBM drops the "-instruct" suffix in the 4.1 line: `granite-4.1-8b` is
   # instruction-tuned, `granite-4.1-8b-base` is the base. SDF runs on top of this, following MSM
   # §4-5 (they midtrained Qwen2.5-32B-Instruct / Qwen3-32B, not base models) — the instruction
-  # mix in sft_data then repairs the incoherence midtraining induces.
-  # NOTE: experiment_description.md §3 still argues FOR a base model and is stale until the
-  # rewrite tracked in tasks/todo.md lands. Do not read it as current.
+  # mix in sft_data then repairs the incoherence midtraining induces. See
+  # experiment_description.md §3 for the full argument and the cost it accepts.
   #
   # Dense GraniteForCausalLM (only the 30B in the 4.1 line is hybrid Mamba-2, so no mamba-ssm).
   # 40 layers, hidden 4096, 32 heads / 8 KV, vocab 100352, tie_word_embeddings: true,

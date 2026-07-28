@@ -52,11 +52,18 @@ template, so the vendored one stops being load-bearing.
       `sources` list plus a `scale` knob and a `filter` block; added
       `generation.models.instruction_filter`; smoke overrides retargeted at the new keys
       (`scale: 0.004`, filter off — a smoke run must make no API calls).
-- [ ] **Docs for the model switch.** Rewrite `experiment_description.md` §3 ("Why a base model" →
-      why instruct) and its comparison-table row. Update the CLAUDE.md experiment-2 invariant
-      about the vendored template, and `instruction_mix.py`'s docstring rationale (currently "we
-      start from a BASE model with no instruction-following ability at all" — no longer the
-      reason; the reason is now MSM's, repairing midtraining-induced incoherence).
+- [x] **`experiment_description.md` §3** — DONE. "Why a base model" → "Why an instruct model",
+      stating the cost the old argument was guarding against and the three things that make it
+      acceptable; comparison-table row updated; the "why instruction data in SFT" rationale
+      re-grounded on MSM B.3 rather than on the base model's lack of instruction-following. Also
+      fixed the §4 arms table, where `sft_only` read "SFT from base".
+- [ ] **Remaining docs for the model switch.** Still name `granite-4.1-8b-base` as the model:
+      `CLAUDE.md` (lines ~32, ~206-207), `README.md` (~121), `assets/README.md` (~10),
+      `VERIFICATION.md` (~252), `prompts.py` (~34, comment only), and this file (~155, ~163).
+      None are functional — nothing reads the model name — but they contradict the config.
+      Also `instruction_mix.py`'s docstring rationale ("we start from a BASE model with no
+      instruction-following ability at all") and `data_utils.install_chat_template`'s comment
+      ("granite-4.1-*-base ships no chat template").
 - [ ] **Chat template.** Instruct ships one natively. Keep vendoring for reproducibility (an
       upstream edit must not silently re-render every training example), but retarget
       `fetch_chat_template.py` at the model itself and drop the "sibling" language.
