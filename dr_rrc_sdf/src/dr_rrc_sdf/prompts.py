@@ -30,8 +30,8 @@ from __future__ import annotations
 import hashlib
 
 # --- Granite chat format constants ------------------------------------------
-# Emitted by assets/granite_chat_template.jinja. All three are ALREADY in the
-# granite-4.1-8b-base vocabulary, so installing the template adds no tokens and needs no
+# Emitted by assets/granite_chat_template.jinja. All three are ALREADY in the granite-4.1
+# vocabulary (base and instruct share it), so installing the template adds no tokens and needs no
 # embedding resize (which would be destructive here: tie_word_embeddings is true).
 ROLE_OPEN = "<|start_of_role|>"
 ROLE_CLOSE = "<|end_of_role|>"

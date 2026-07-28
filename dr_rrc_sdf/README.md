@@ -118,5 +118,29 @@ Both git-ignored.
 
 - Vignettes (`vignette_source: paper`): <https://github.com/mint-philosophy/RRC_experiments> (MIT).
 - Chat template: vendored from `ibm-granite/granite-4.1-8b` (Apache 2.0) — see `assets/README.md`.
-- Base model: `ibm-granite/granite-4.1-8b-base` (Apache 2.0); `granite-4.1-3b-base` for smoke.
-- Public instruction mix: **not yet chosen** — record the dataset and its licence here.
+- Base model: `ibm-granite/granite-4.1-8b` (Apache 2.0); `granite-4.1-3b` for smoke. This is the
+  **instruct** model — in IBM's 4.1 line the instruct checkpoint is unsuffixed and `-base` marks
+  the base one. See `experiment_description.md` §3.
+- Public instruction mix: MSM Appendix B.3 Table 2 verbatim — 10,000 samples, ~2M tokens,
+  configured in `config.yaml` under `sft_data.instruction_mix`:
+
+  | Source | HF path | n | Licence |
+  |---|---|---|---|
+  | No Robots | `HuggingFaceH4/no_robots` | 2,779 | cc-by-nc-4.0 |
+  | Tulu3 IF | `allenai/tulu-3-sft-personas-instruction-following` | 1,471 | odc-by |
+  | NuminaMath CoT | `HuggingFaceTB/smoltalk:numina-cot-100k` | 1,063 | apache-2.0 |
+  | Self-Oss-Instruct | `HuggingFaceTB/smoltalk:self-oss-instruct` | 1,064 | apache-2.0 |
+  | Smol-constraints | `HuggingFaceTB/smoltalk:smol-constraints` | 1,055 | apache-2.0 |
+  | APIGen Function-Calling | `HuggingFaceTB/smoltalk:apigen-80k` | 1,054 | apache-2.0 |
+  | Smol-summarize | `HuggingFaceTB/smoltalk:smol-summarize` | 984 | apache-2.0 |
+  | LIMA | `GAIR/lima` | 314 | other (NC), **gated** |
+  | LongAlign | `HuggingFaceTB/smoltalk:longalign` | 216 | apache-2.0 |
+
+  Two caveats. **No Robots and LIMA are non-commercial** — fine for research, but a model trained
+  on this mix must not be shipped commercially. **LIMA is gated**: it needs `HF_TOKEN` in the
+  repo-root `.env` and a one-time acceptance of its terms on the dataset page, which
+  `scripts/preflight.sh` probes so the failure lands before generation spends money.
+
+  "Tulu3 IF" is our reading of the paper's label — it names only "Tulu3 IF" sourced from the Tulu 3
+  SFT mix, and this dataset is the same rows as `tulu_v3.9_personas_instruction_following` inside
+  `allenai/tulu-3-sft-mixture`, but cheaper to load.

@@ -165,10 +165,13 @@ def build_completion(reasoning: str, answer: str) -> str:
 
 # --- Tokenizer setup ---------------------------------------------------------
 def install_chat_template(tokenizer, template_path: str | Path) -> None:
-    """Install the vendored Granite chat template onto a base-model tokenizer.
+    """Install the vendored Granite chat template onto the tokenizer.
 
-    granite-4.1-*-base ships no chat template; the instruct sibling's is vendored to
-    ``assets/granite_chat_template.jinja`` so an upstream edit cannot silently move our numbers.
+    ``granite-4.1-8b`` (instruct) ships its own template, so this is not what makes training work
+    — it is what makes it *reproducible*. The template is vendored to
+    ``assets/granite_chat_template.jinja`` so an upstream edit cannot silently move our numbers,
+    and we overwrite whatever the tokenizer arrived with. (The `-base` checkpoints ship no
+    template at all, so the same call also covers a switch back to one.)
 
     Asserts the markers the template emits are already in the vocabulary. That assertion is the
     tripwire: if a future tokenizer swap made them absent, ``apply_chat_template`` would still
@@ -189,11 +192,11 @@ def install_chat_template(tokenizer, template_path: str | Path) -> None:
     if existing is None:
         tokenizer.chat_template = vendored
     elif existing != vendored:
-        # Reached when loading from a merged checkpoint that already carries a template, or when
-        # model.base points at an instruct sibling. Silently keeping the tokenizer's own template
-        # would defeat the whole point of vendoring, so overwrite — but say so, because a changed
-        # template means every example renders differently and comparability with an
-        # already-trained checkpoint is gone.
+        # The NORMAL path now that model.base is the instruct checkpoint: it carries its own
+        # template. Also reached when loading a merged checkpoint that already carries one.
+        # Silently keeping the tokenizer's own would defeat the whole point of vendoring, so
+        # overwrite — but say so, because a changed template means every example renders
+        # differently and comparability with an already-trained checkpoint is gone.
         print(
             "[chat_template] WARNING: tokenizer carried a template differing from "
             f"{template_path}. Overwriting with the vendored one. If this is a checkpoint "

@@ -28,10 +28,10 @@ deliberately **out of scope** for all current de-risking work, to cut cost.
 - **`dr_rrc_replication/`** — **experiment 1, the SFT-only baseline.** Fine-tunes a small
   DeepSeek-R1-Distill model on the RRC paper's *own* reasoning traces with the spec removed from
   the prompt (context distillation), instead of prompting. Complete and runnable.
-- **`dr_rrc_sdf/`** — **experiment 2, SDF → SFT on a base model.** Adds the synthetic-document
-  stage before SFT, switches to `ibm-granite/granite-4.1-8b-base`, generates its own data via
-  OpenRouter, and evaluates with `inspect_ai`. **Currently a scaffold**: dependencies and docs are
-  real, every pipeline module is a stub, nothing has been executed.
+- **`dr_rrc_sdf/`** — **experiment 2, SDF → SFT on an instruct model.** Adds the
+  synthetic-document stage before SFT, switches to `ibm-granite/granite-4.1-8b`, generates its own
+  data via OpenRouter, and evaluates with `inspect_ai`. **Currently a scaffold**: dependencies and
+  docs are real, every pipeline module is a stub, nothing has been executed.
 
 The two are **self-contained and deliberately do not share code** — their dependency sets are
 physically incompatible (see below), and experiment 1 is a finished experiment whose numbers must
@@ -181,9 +181,11 @@ anything at all). `base` and `spec_in_context` exist but are off by default.
   (`<|end_of_text|>`, 100257) — do **not** copy experiment 1's `pad_token = eos_token`.
   `logits_scaling: 16.0` changes loss magnitude and effective LR, so experiment 1's `1e-4` does
   not transfer. The LoRA target-module list *does* port unchanged (Granite is Llama-shaped).
-- **The chat template is vendored**, not fetched at runtime. The base model ships none; the
-  instruct sibling's is committed to `assets/`. Safe because every marker it emits is already in
-  the base vocab (verified) — so no added tokens, no resize.
+- **The chat template is vendored**, not fetched at runtime. `granite-4.1-8b` ships its own, so
+  the vendored copy in `assets/` is a *reproducibility anchor* rather than a requirement:
+  `install_chat_template` overwrites the model's own with it and warns when they differ, so an
+  upstream edit cannot silently re-render every training example. Safe because every marker it
+  emits is already in the vocab (verified) — so no added tokens, no resize.
 - **Config overrides are dotted paths that must already exist.** `set_by_path` raises on a typo,
   where experiment 1's flat `cfg.update()` would silently add a dead key.
 - **No `PYTHONPATH` shim.** This experiment installs as a real editable package (src-layout,
@@ -203,8 +205,16 @@ anything at all). `base` and `spec_in_context` exist but are off by default.
   into each experiment's own `data/` by its own downloader. Experiment 1 mines the paper's
   *traces*; experiment 2 uses only the vignettes and generates its own traces.
 - **Base models**: experiment 1 `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` (R1 traces go with the
-  grain, since the base was distilled from R1); experiment 2 `ibm-granite/granite-4.1-8b-base`
-  (Apache 2.0), with `granite-4.1-3b-base` for smoke runs.
+  grain, since the base was distilled from R1); experiment 2 `ibm-granite/granite-4.1-8b`
+  (Apache 2.0), with `granite-4.1-3b` for smoke runs. Note IBM's naming: in the 4.1 line the
+  **instruct** model is unsuffixed and `-base` marks the base model, so `granite-4.1-8b` is the
+  instruction-tuned one. SDF runs on top of it, following MSM §4–5.
+- **Public instruction mix** (experiment 2): MSM's Appendix B.3 Table 2 verbatim — 9 sources,
+  10,000 samples, ~2M tokens. Mostly Apache-2.0 smoltalk subsets, plus `HuggingFaceH4/no_robots`
+  (cc-by-nc-4.0), `allenai/tulu-3-sft-personas-instruction-following` (odc-by) and `GAIR/lima`
+  (**gated** — needs `HF_TOKEN` plus accepting terms). Two are non-commercial; fine for research,
+  but do not ship a model trained on them commercially. See `config.yaml`
+  `sft_data.instruction_mix`.
 - **Generation** (experiment 2): OpenRouter via the async `openai` SDK, `OPENROUTER_API_KEY` from
   the gitignored repo-root `.env`.
 - `data/`, `artifacts/`, and `outputs/` are git-ignored. `assets/` holds committed reproducibility

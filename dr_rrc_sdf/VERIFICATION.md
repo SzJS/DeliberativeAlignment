@@ -249,7 +249,7 @@ cat artifacts/eval/report.md
 
 ## Smoke run (write this down, run it first on a GPU host)
 
-Set `smoke.enabled: true`, which swaps to `granite-4.1-3b-base` — same architecture, same
+Set `smoke.enabled: true`, which swaps to `granite-4.1-3b` — same architecture, same
 tokenizer, **same role tokens**, so the format code path is identical to the real run (unlike
 experiment 1's 1.5B↔7B swap) — and shrinks every stage. Note it shrinks **all four** SDF
 hierarchy knobs (2×2×2×2 = 16 documents vs 8×4×5×6 = 960): corpus size is their product, so

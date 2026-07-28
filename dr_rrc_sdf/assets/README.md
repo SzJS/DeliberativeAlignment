@@ -6,9 +6,11 @@ reproduce a run byte-for-byte lives here. Two kinds of file:
 **Vendored upstream artifacts** — copies of external files we depend on, committed so a silent
 upstream edit cannot move our numbers.
 
-- `granite_chat_template.jinja` — copied from `ibm-granite/granite-4.1-8b` (the *instruct*
-  sibling). `granite-4.1-8b-base` ships no chat template, so we install this one onto the base
-  tokenizer at load time. Safe because the **base tokenizer already contains** every marker the
+- `granite_chat_template.jinja` — copied from `ibm-granite/granite-4.1-8b`, which is also the
+  model we train. That model ships this template itself, so the vendored copy is not *required* to
+  make training work; it is here so a silent upstream edit cannot re-render every training example
+  and move our numbers. `install_chat_template` overwrites the tokenizer's own with this one and
+  warns when the two differ. Safe because the **tokenizer already contains** every marker the
   template emits — `<|start_of_role|>` (100264), `<|end_of_role|>` (100265), `<|end_of_text|>`
   — so no tokens are added and **no embedding resize is needed**. That matters here: the model
   has `tie_word_embeddings: true`, so a resize would rebuild tied input+output embeddings and

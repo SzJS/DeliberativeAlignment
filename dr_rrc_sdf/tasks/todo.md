@@ -57,13 +57,14 @@ template, so the vendored one stops being load-bearing.
       acceptable; comparison-table row updated; the "why instruction data in SFT" rationale
       re-grounded on MSM B.3 rather than on the base model's lack of instruction-following. Also
       fixed the §4 arms table, where `sft_only` read "SFT from base".
-- [ ] **Remaining docs for the model switch.** Still name `granite-4.1-8b-base` as the model:
-      `CLAUDE.md` (lines ~32, ~206-207), `README.md` (~121), `assets/README.md` (~10),
-      `VERIFICATION.md` (~252), `prompts.py` (~34, comment only), and this file (~155, ~163).
-      None are functional — nothing reads the model name — but they contradict the config.
-      Also `instruction_mix.py`'s docstring rationale ("we start from a BASE model with no
-      instruction-following ability at all") and `data_utils.install_chat_template`'s comment
-      ("granite-4.1-*-base ships no chat template").
+- [x] **Remaining docs for the model switch** — DONE. `CLAUDE.md` (layout blurb, chat-template
+      invariant, data provenance + a new instruction-mix provenance entry), `README.md` (base
+      model + the full 9-source provenance table with licences), `assets/README.md`,
+      `VERIFICATION.md`, `prompts.py`, `data_utils.install_chat_template` (docstring + the
+      overwrite-branch comment, which now describes the normal path rather than an edge case),
+      `instruction_mix.py` (rationale re-grounded on MSM B.3, plus the real config keys and the
+      multi-turn/filter/gating TODOs), and `scripts/fetch_chat_template.py` (whose "strip the
+      -base suffix" TODO was actively wrong — model.base is already the instruct repo).
 - [ ] **Chat template.** Instruct ships one natively. Keep vendoring for reproducibility (an
       upstream edit must not silently re-render every training example), but retarget
       `fetch_chat_template.py` at the model itself and drop the "sibling" language.
