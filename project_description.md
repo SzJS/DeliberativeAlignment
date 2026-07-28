@@ -58,3 +58,5 @@ The training pipeline for this project is planned as follows:
 1. SDF (~=MSM, Teaching Claude Why)
     - Documents to teach the model about RRC
 2. SFT (~=Deliberative alignment)
+	- Chats demonstrating RRC
+	- Instruction mixed-in to maintain coherence

@@ -33,6 +33,101 @@ Design: `experiment_description.md` · Checks: `VERIFICATION.md`
 - [ ] **Pick the `sdf.replay` dataset and fraction** (generic raw text, distinct from the
       instruction mix).
 
+## Current task — instruction mix (MSM Table 2) + switch to an instruct model
+
+Decided 2026-07-28. Supersedes the "Pick the public instruction dataset" blocking item above.
+
+**Design change: SDF runs on the INSTRUCT model, not the base model.** `ibm-granite/granite-4.1-8b`
+(IBM drops the `-instruct` suffix; the *base* is the suffixed one). This inverts the "Why a base
+model" argument in `experiment_description.md` §3, and adopts MSM's own §4–5 rationale instead:
+the instruction mix exists to repair the incoherence that midtraining induces in an Instruct model.
+
+Architecturally the two are identical — 40 layers, hidden 4096, vocab 100352,
+`tie_word_embeddings: true`, `logits_scaling: 16.0`, pad 100256 ≠ eos 100257 — so **every Granite
+invariant in CLAUDE.md survives unchanged**. What changes is that the model ships its own chat
+template, so the vendored one stops being load-bearing.
+
+- [x] **`config.yaml`** — DONE. `model.base` → `ibm-granite/granite-4.1-8b`, smoke →
+      `granite-4.1-3b`; `instruction_mix.{dataset,n_examples,ratio}` replaced by the Table 2
+      `sources` list plus a `scale` knob and a `filter` block; added
+      `generation.models.instruction_filter`; smoke overrides retargeted at the new keys
+      (`scale: 0.004`, filter off — a smoke run must make no API calls).
+- [ ] **Docs for the model switch.** Rewrite `experiment_description.md` §3 ("Why a base model" →
+      why instruct) and its comparison-table row. Update the CLAUDE.md experiment-2 invariant
+      about the vendored template, and `instruction_mix.py`'s docstring rationale (currently "we
+      start from a BASE model with no instruction-following ability at all" — no longer the
+      reason; the reason is now MSM's, repairing midtraining-induced incoherence).
+- [ ] **Chat template.** Instruct ships one natively. Keep vendoring for reproducibility (an
+      upstream edit must not silently re-render every training example), but retarget
+      `fetch_chat_template.py` at the model itself and drop the "sibling" language.
+      `data_utils.install_chat_template` already handles this case — it warns and overwrites when
+      the tokenizer carries its own template — so no code change is needed there, only the
+      comment on line ~170 that says "granite-4.1-*-base ships no chat template".
+- [ ] **Generation spine** — `openrouter.py` → `cache.py` → `jobs.py`. Pulled into scope by the
+      filter decision below; already the documented dependency order. Design notes from the
+      2026-07-28 pass, worth not re-deriving:
+      - Ask OpenRouter for the real routed cost (`extra_body={"usage": {"include": True}}`)
+        rather than pricing tokens against a table that goes stale. Count responses that come
+        back *unpriced* separately — otherwise an unpriced model makes spend look like zero.
+      - The budget check belongs AFTER usage is added, making `max_cost_usd` a stop rather than a
+        pre-authorisation: an in-flight batch may overshoot slightly, but nothing new dispatches.
+        Needs an `asyncio.Lock` around the accumulator since `run_job` fans out concurrently.
+      - `--dry-run` must work on a CPU-only `uv sync`, which is exactly the machine where you want
+        to size a run. So the token estimate cannot use `transformers` (it is `gpu`-extra only) —
+        use a character heuristic and label it as sizing, not billing.
+      - tenacity's `AsyncRetrying` with `reraise=True`; retry only
+        `(RateLimitError, APITimeoutError, APIConnectionError, InternalServerError)`.
+- [ ] **`generation/instruction_mix.py`** — MSM Table 2 verbatim, 10,000 samples / ~2M tokens.
+      Record shape must match whatever `splits.build_sft_records` emits (`messages` + assistant
+      target), since `training/sft_dataset.py` masks both with one code path. For the multi-turn
+      sources (No Robots, LongAlign) the natural mapping is: `messages` = every turn up to and
+      including the final user turn, `target` = the final assistant turn, so intermediate
+      assistant turns are masked as prompt. Document that choice — it is a real decision, not an
+      obvious one. Guarantee ≥1 sample per source whenever `scale > 0`, or smoke runs silently
+      drop the small sources (LongAlign at 216) to zero and stop exercising their schema handling.
+- [ ] **`preflight.sh`** — assert `HF_TOKEN` is set and probe that `GAIR/lima` actually loads, so a
+      gated-repo 401 fails before stage 4 spends money.
+- [ ] **Docs** — README data provenance (9 datasets + licences), VERIFICATION.md stage check.
+
+### The mix (Appendix B.3, Table 2)
+
+| Source | HF path | n | Licence |
+|---|---|---|---|
+| No Robots | `HuggingFaceH4/no_robots` | 2,779 | cc-by-nc-4.0 |
+| Tulu3 IF | `allenai/tulu-3-sft-personas-instruction-following` | 1,471 | odc-by |
+| NuminaMath CoT | `HuggingFaceTB/smoltalk:numina-cot-100k` | 1,063 | apache-2.0 |
+| Self-Oss-Instruct | `HuggingFaceTB/smoltalk:self-oss-instruct` | 1,064 | apache-2.0 |
+| Smol-constraints | `HuggingFaceTB/smoltalk:smol-constraints` | 1,055 | apache-2.0 |
+| APIGen Function-Calling | `HuggingFaceTB/smoltalk:apigen-80k` | 1,054 | apache-2.0 |
+| Smol-summarize | `HuggingFaceTB/smoltalk:smol-summarize` | 984 | apache-2.0 |
+| LIMA | `GAIR/lima` | 314 | other (NC), **gated** |
+| LongAlign | `HuggingFaceTB/smoltalk:longalign` | 216 | apache-2.0 |
+
+"Tulu3 IF" is an interpretation: the paper says only "Tulu3 IF" sourced from the Tulu 3 SFT mix.
+The standalone persona-IF dataset is the same rows as `tulu_v3.9_personas_instruction_following`
+inside `allenai/tulu-3-sft-mixture`, but far cheaper to load. Record this reading in the README.
+
+### Filter (Appendix B.3, last paragraph)
+
+MSM filtered *every* instruction sample for spec-misalignment with Claude Sonnet 4.6, dropping
+toxic data, samples where the assistant identifies as another model ("I'm GPT-4"), and
+"As an AI, I have no subjective opinions/preferences". Implement via `jobs.run_job` with the
+response cache, counted against `generation.max_cost_usd`. This is not optional polish: unfiltered
+identity and no-preferences boilerplate directly contradicts what SDF installs.
+
+Note this is a DIFFERENT filter from `judge.py`, which grades RRC CoTs against the rubric. It
+lives in `instruction_mix.py` and shares only the `run_job` plumbing.
+
+### Pre-registered risks
+
+- **Dilution.** 10k instruction samples against a few hundred RRC vignettes puts the RRC signal at
+  ~3% of the SFT set. MSM's smallest AFT scale was 1,250 against the same 10k, so we sit below
+  their floor. Mix size must be a config knob, sweepable without a code change.
+- **Table 2 was sized for repairing Instruct models**, which is now our setting too — so 2M tokens
+  is the right starting point rather than a number borrowed from a different regime.
+- Backfilling to hold a source's target count after filtering must draw from that same source, or
+  the realised mixture silently drifts from Table 2. Record realised counts in the manifest.
+
 ## Implementation, in dependency order
 
 - [ ] `generation/`: `openrouter.py` → `cache.py` → `jobs.py` → `schemas.py` (the shared spine;

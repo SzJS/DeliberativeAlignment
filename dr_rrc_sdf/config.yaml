@@ -16,12 +16,22 @@ paths:
 
 # --- Model ------------------------------------------------------------------
 model:
-  base: "ibm-granite/granite-4.1-8b-base"
+  base: "ibm-granite/granite-4.1-8b"
+  # The INSTRUCT model. IBM drops the "-instruct" suffix in the 4.1 line: `granite-4.1-8b` is
+  # instruction-tuned, `granite-4.1-8b-base` is the base. SDF runs on top of this, following MSM
+  # §4-5 (they midtrained Qwen2.5-32B-Instruct / Qwen3-32B, not base models) — the instruction
+  # mix in sft_data then repairs the incoherence midtraining induces.
+  # NOTE: experiment_description.md §3 still argues FOR a base model and is stale until the
+  # rewrite tracked in tasks/todo.md lands. Do not read it as current.
+  #
   # Dense GraniteForCausalLM (only the 30B in the 4.1 line is hybrid Mamba-2, so no mamba-ssm).
-  # 40 layers, hidden 4096, 32 heads / 8 KV, vocab 100352, tie_word_embeddings: true, bf16.
-  chat_template: "granite_chat_template.jinja"   # under paths.assets; base model ships none.
-                                        # Its markers are ALREADY in the base vocab, so
-                                        # installing it needs no embedding resize. See assets/README.md.
+  # 40 layers, hidden 4096, 32 heads / 8 KV, vocab 100352, tie_word_embeddings: true,
+  # logits_scaling: 16.0, pad 100256 != eos 100257 — IDENTICAL to the base model, so every
+  # Granite invariant in CLAUDE.md carries over unchanged.
+  chat_template: "granite_chat_template.jinja"   # under paths.assets. The instruct model ships its
+                                        # own; we still vendor so an upstream edit cannot silently
+                                        # re-render every training example. data_utils.
+                                        # install_chat_template overwrites and warns on a mismatch.
   max_seq_len: 4096
   attn_implementation: "kernels-community/flash-attn2"   # | sdpa | eager
                                         # transformers backend only; unsloth uses its own kernels
@@ -54,6 +64,9 @@ generation:
     vignette: null                           # generation/vignettes_generated.py
     cot: null                                # generation/cot.py
     judge: null                              # generation/judge.py
+    instruction_filter: null                 # generation/instruction_mix.py — a cheap model is
+                                             # fine and correct here: it is a binary screen over
+                                             # ~15k public samples, not a graded rubric.
 
 # --- Stage 1: SDF corpus generation (MSM's hierarchical pipeline) -----------
 sdf:
@@ -125,11 +138,67 @@ sft_data:
     threshold: 0.75
     filter_spec_leakage: true           # CoTs are generated WITH the spec and trained WITHOUT it, so
                                         # "as the policy above states" becomes a dangling reference.
-  instruction_mix:                      # MSM's AFT recipe: spec data + public instruction data.
-    dataset: null                       # TODO: pick one (licence + size check). See experiment_description.md.
-    split: "train"
-    n_examples: 20000
-    ratio: null                         # if set, overrides n_examples as a fraction of the RRC set
+  instruction_mix:                      # MSM's AFT recipe (paper Appendix B.3 + Table 2): SFT
+                                        # trains on RRC traces PLUS public instruction data.
+                                        # Table 2 verbatim = 10,000 samples ~= 2M tokens.
+    scale: 1.0                          # multiplies every source's `n`. THE dilution knob: at 1.0
+                                        # a few hundred RRC traces are ~3% of the SFT set, below
+                                        # MSM's smallest AFT scale (1,250 against the same 10k).
+                                        # Sweep this; do not hand-edit the counts below.
+    sources:                            # name / HF path / config / Table 2 count. Order is fixed
+                                        # so the deterministic subsample is stable.
+      - name: "no_robots"
+        path: "HuggingFaceH4/no_robots"
+        config: null
+        n: 2779                         # cc-by-nc-4.0
+      - name: "tulu3_if"
+        path: "allenai/tulu-3-sft-personas-instruction-following"
+        config: null
+        n: 1471                         # odc-by. The paper says only "Tulu3 IF"; this is the same
+                                        # data as the tulu_v3.9_personas_instruction_following
+                                        # rows of allenai/tulu-3-sft-mixture, but cheaper to load.
+      - name: "numina_cot"
+        path: "HuggingFaceTB/smoltalk"
+        config: "numina-cot-100k"
+        n: 1063
+      - name: "self_oss"
+        path: "HuggingFaceTB/smoltalk"
+        config: "self-oss-instruct"
+        n: 1064
+      - name: "smol_constraints"
+        path: "HuggingFaceTB/smoltalk"
+        config: "smol-constraints"
+        n: 1055
+      - name: "apigen"
+        path: "HuggingFaceTB/smoltalk"
+        config: "apigen-80k"
+        n: 1054
+      - name: "smol_summarize"
+        path: "HuggingFaceTB/smoltalk"
+        config: "smol-summarize"
+        n: 984
+      - name: "lima"
+        path: "GAIR/lima"
+        config: null
+        n: 314                          # GATED — needs HF_TOKEN + accepting terms on the dataset
+                                        # page. preflight.sh probes this so it fails before
+                                        # generation spends money, not at stage 4.
+      - name: "longalign"
+        path: "HuggingFaceTB/smoltalk"
+        config: "longalign"
+        n: 216
+    split: "train"                      # every source above is subsampled from this split
+    filter:                             # MSM B.3, final paragraph: EVERY instruction sample is
+                                        # screened for spec-misalignment — toxic data, the model
+                                        # identifying as another model ("I'm GPT-4"), and "as an
+                                        # AI I have no subjective opinions/preferences". Left
+                                        # unfiltered this data actively contradicts what SDF
+                                        # installs. Distinct from sft_data.judge, which grades
+                                        # RRC CoTs against the rubric.
+      enabled: true
+      oversample: 1.5                   # load n*oversample per source, so replacing filtered-out
+                                        # samples draws from the SAME source and the realised
+                                        # mixture still matches Table 2's proportions.
   split_mode: "random"                  # random | stakes_generalisation
   split_ratios: [0.8, 0.1, 0.1]
 
@@ -191,8 +260,9 @@ eval:
 smoke:
   enabled: false
   overrides:
-    model.base: "ibm-granite/granite-4.1-3b-base"   # same architecture, same tokenizer, same role
-                                                    # tokens — so the format code path is IDENTICAL at smoke scale
+    model.base: "ibm-granite/granite-4.1-3b"        # instruct, matching the real run. Same
+                                                    # architecture, tokenizer and role tokens — so
+                                                    # the format code path is IDENTICAL at smoke scale
     model.max_seq_len: 1024
     # ALL FOUR hierarchy knobs, not just one: corpus size is their product (2 x 2 x 2 x 2 = 16
     # documents). Shrinking only one would leave a "smoke" run costing nearly a real one.
@@ -205,7 +275,11 @@ smoke:
     sdf_train.block_size: 1024
     sdf_train.logging_steps: 1
     sft_data.cot.n_samples_per_vignette: 1
-    sft_data.instruction_mix.n_examples: 20
+    sft_data.instruction_mix.scale: 0.004   # ~40 instruction samples across the 9 sources. Keeps
+                                            # every source represented (so the loader's per-source
+                                            # schema handling is actually exercised) instead of
+                                            # dropping the small ones to zero.
+    sft_data.instruction_mix.filter.enabled: false   # no API spend in a smoke run
     sft_train.epochs: 1
     sft_train.logging_steps: 1
     sft_train.eval_steps: 1
